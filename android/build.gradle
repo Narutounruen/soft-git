@@ -1,0 +1,23 @@
+buildscript {
+    ext {
+        buildToolsVersion = "35.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 35
+        targetSdkVersion = 30
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "1.9.22" // ✅ ใช้เวอร์ชันที่เสถียรกับ Gradle Plugin
+    }
+    repositories {
+        google()
+        maven { url 'https://jitpack.io' }
+        mavenCentral()
+    }
+    dependencies {
+        // ✅ ระบุเวอร์ชันของ Gradle Plugin
+        classpath 'com.android.tools.build:gradle:8.2.2'
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"
