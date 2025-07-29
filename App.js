@@ -15,6 +15,7 @@ import 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import SoftphoneScreen from './SoftphoneScreen';
+import CallingScreen from './CallingScreen';
 
 
 function HomeScreen({ navigation, status, setStatus, isConnected, setIsConnected, setAccountRef, setEndpointRef, setCurrentCallRef, setIsInCall, setCallStatus, config, setConfig }) {
@@ -238,6 +239,7 @@ const forceDisconnect = async () => {
           setCallStatus('📞 วางสายแล้ว');
           setIsInCall(false);
           setCurrentCallRef(null);
+          setCurrentCallNumber('');
           setTimeout(() => setCallStatus(''), 2000);
         }
       });
@@ -379,8 +381,6 @@ const forceDisconnect = async () => {
         </Text>
       </View>
 
-
-      <Button title="Softphone config" onPress={() => navigation.navigate('Softphone')} />
     </View>
   );
 }
@@ -455,6 +455,7 @@ export default function App() {
   const [currentCallRef, setCurrentCallRef] = useState(null);
   const [isInCall, setIsInCall] = useState(false);
   const [callStatus, setCallStatus] = useState('');
+  const [currentCallNumber, setCurrentCallNumber] = useState('');
   const [config, setConfig] = useState({
     username: "1003",
     domain: "192.168.0.5",
@@ -476,6 +477,7 @@ export default function App() {
 
     try {
       setCallStatus('📞 เริ่มโทร...');
+      setCurrentCallNumber(callNumber);
       const callUri = `sip:${callNumber}@${config.domain}`;
       const call = await endpointRef.makeCall(accountRef, callUri);
       setCurrentCallRef(call);
@@ -488,16 +490,32 @@ export default function App() {
 
   // ฟังก์ชันวางสาย
   const hangupCall = async () => {
-    if (currentCallRef) {
+    if (currentCallRef && typeof currentCallRef.hangup === 'function') {
       try {
         await currentCallRef.hangup();
         setCallStatus('📞 วางสายแล้ว');
         setIsInCall(false);
         setCurrentCallRef(null);
+        setCurrentCallNumber('');
         setTimeout(() => setCallStatus(''), 2000);
       } catch (error) {
         console.error('Hangup error:', error);
       }
+    } else {
+      // เพิ่ม log หรือแจ้งเตือนกรณีไม่มีสายให้วาง
+      setCallStatus('❌ ไม่มีสายที่ต้องวาง');
+      setTimeout(() => setCallStatus(''), 2000);
+    }
+  };
+
+  // ฟังก์ชันไปยังหน้า CallingScreen
+  const navigateToCalling = () => {
+    if (isInCall) {
+      // ใช้ setTimeout เพื่อให้ navigation ทำงานหลังจาก state อัปเดตแล้ว
+      setTimeout(() => {
+        // หา navigation instance จาก ref หรือ context
+        // สำหรับตอนนี้จะใช้วิธีอื่น
+      }, 100);
     }
   };
 
@@ -521,6 +539,26 @@ export default function App() {
               config={config}
               makeCall={makeCall}
               hangupCall={hangupCall}
+              setCurrentCallNumber={setCurrentCallNumber}
+              navigateToCalling={navigateToCalling}
+            />
+          )}
+        </Stack.Screen>
+        <Stack.Screen
+          name="Calling"
+          options={{ 
+            title: 'กำลังโทร',
+            headerShown: false,
+            gestureEnabled: false
+          }}
+        >
+          {props => (
+            <CallingScreen
+              {...props}
+              hangupCall={hangupCall}
+              callStatus={callStatus}
+              isInCall={isInCall}
+              currentCallNumber={currentCallNumber}
             />
           )}
         </Stack.Screen>
