@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import Sound from 'react-native-sound';
 import { Endpoint } from 'react-native-pjsip';
+import mockSipService from './services/mockSipService';
 import InCallManager from 'react-native-incall-manager';
 import 'react-native-gesture-handler';
 import { NavigationContainer, useFocusEffect } from '@react-navigation/native';
@@ -646,7 +647,7 @@ function HomeScreen({
     }
   };
 
-  // เชื่อมต่อ SIP
+  // เชื่อมต่อ SIP (Mock Version)
   const connectSIP = async () => {
     if (isConnecting) return;
     if (!config.domain || !config.username || !config.password) {
@@ -657,82 +658,60 @@ function HomeScreen({
     setIsConnecting(true);
     setIsConnected(false);
     setStatus('กำลังเชื่อมต่อ...');
-    await cleanup();
 
     try {
       // ขอสิทธิ์
       await requestPermissions();
 
-      // สร้าง Endpoint
-      endpointRef.current = new Endpoint();
+      console.log('🔄 เริ่มเชื่อมต่อ SIP (Mock)...');
+      
+      // สร้าง listener สำหรับ mock service
+      const handleSipEvent = (event, data) => {
+        console.log(`� SIP Event: ${event}`, data);
+        
+        if (event === 'registrationChanged') {
+          if (data.isRegistered) {
+            setIsConnected(true);
+            setIsConnecting(false);
+            setStatus('เชื่อมต่อแล้ว');
+            console.log('✅ เชื่อมต่อ SIP สำเร็จ (Mock)');
+          } else {
+            setIsConnected(false);
+            setStatus('ไม่สามารถเชื่อมต่อได้');
+            setIsConnecting(false);
+          }
+        } else if (event === 'callStateChanged') {
+          setCallStatus(`สถานะ: ${data.state}`);
+          if (data.state === 'CONNECTED') {
+            setCurrentCall(data.callId);
+          } else if (data.state === 'DISCONNECTED') {
+            setCurrentCall(null);
+            setCallStatus('');
+          }
+        }
+      };
 
-      // เริ่มต้น endpoint พร้อมตั้งค่าเพิ่มเติม
-      await endpointRef.current.start({
-        userAgent: 'Simple SIP Client',
-        logLevel: 5, // เพิ่มระดับการบันทึกล็อกเพื่อให้ง่ายต่อการแก้ไขปัญหา
-        logConfig: {
-          console: true,
-        },
+      // เพิ่ม listener
+      mockSipService.addListener(handleSipEvent);
+
+      // จำลองการลงทะเบียน
+      const accountId = mockSipService.addAccount({
+        username: config.username,
+        domain: config.domain,
+        password: config.password
       });
 
-      // เริ่มต้น Transfer Manager
-      transferManagerRef.current = new PJSIPCallTransfer(endpointRef.current);
-      transferManagerRef.current.setupTransferCallbacks({
-        onTransferStarted: (callId, targetUri) => {
-          console.log(`🔄 การโอนสายเริ่มต้น: ${callId} -> ${targetUri}`);
-          setCallStatus('เริ่มการโอนสาย...');
-        },
-        onTransferCompleted: (callId, targetUri) => {
-          console.log(`✅ โอนสายสำเร็จ: ${callId} -> ${targetUri}`);
-          setCallStatus('โอนสายสำเร็จ');
-          setTimeout(() => setCallStatus(''), 3000);
-        },
-        onTransferFailed: (callId, targetUri, error) => {
-          console.log(`❌ โอนสายไม่สำเร็จ: ${callId} -> ${targetUri}, Error: ${error}`);
-          setCallStatus('โอนสายไม่สำเร็จ');
-          Alert.alert('ข้อผิดพลาด', `โอนสายไม่สำเร็จ: ${error}`);
-          setTimeout(() => setCallStatus(''), 3000);
-        },
-        onTransferProgress: (callId, status) => {
-          console.log(`📊 สถานะการโอนสาย: ${callId}, Status: ${status}`);
-          setCallStatus(`กำลังโอนสาย: ${status}`);
-        }
-      });
-      console.log('✅ Transfer Manager เริ่มต้นแล้ว');
+      console.log(`🆔 Account ID: ${accountId}`);
 
-      // ตั้ง timeout สำหรับการเชื่อมต่อ (30 วินาที)
-      connectionTimeoutRef.current = setTimeout(() => {
-        if (isConnecting) {
-          handleConnectionTimeout();
-        }
-      }, 30000);
+    } catch (error) {
+      setIsConnecting(false);
+      setStatus(`❌ ${error.message || error}`);
+      console.error('การเชื่อมต่อ SIP ล้มเหลว:', error);
+      Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่');
+    }
+  };
 
-      // จัดการ events
-      endpointRef.current.on('registration_changed', registration => {
-        // ยกเลิก timeout เมื่อได้ response
-        if (connectionTimeoutRef.current) {
-          clearTimeout(connectionTimeoutRef.current);
-          connectionTimeoutRef.current = null;
-        }
-
-        const regData = registration?._registration || registration;
-        const isActive = regData?._active || regData?.status === 'PJSIP_SC_OK';
-
-        setIsConnecting(false);
-        if (isActive) {
-          setIsConnected(true);
-          setStatus('✅ เชื่อมต่อสำเร็จ');
-          setAccountRef(accountRef.current);
-          setEndpointRef(endpointRef.current);
-
-          navigation.navigate('Softphone'); // <-- เพิ่มบรรทัดนี้
-        } else {
-          setIsConnected(false);
-          const reason =
-            regData?._reason || regData?._statusText || 'เชื่อมต่อไม่สำเร็จ';
-          setStatus(`❌ ${reason}`);
-        }
-      });
+  // ฟังก์ชันโทรออก (Mock Version)
 
       // จัดการ call events
       // เตรียมเสียงเรียกเข้า
@@ -1338,28 +1317,13 @@ function HomeScreen({
             audioMode: 'communication', // เปลี่ยนเป็น communication
             audioQuality: 'default', // ใช้ default แทน high
 
-            // การตั้งค่าเพิ่มเติมสำหรับ PJSIP
-            clockRate: 8000, // Clock rate สำหรับ audio
-            ptime: 20, // Packet time 20ms
-            maxptime: 20, // Maximum packet time
-          },
-        },
-      };
+      console.log(`🆔 Account ID: ${accountId}`);
 
-      accountRef.current = await endpointRef.current.createAccount(
-        accountConfig,
-      );
     } catch (error) {
       setIsConnecting(false);
-      setIsConnected(false);
-      setStatus(`❌ ผิดพลาด: ${error.message}`);
-      Alert.alert('ผิดพลาด', error.message);
-
-      // ยกเลิก timeout ถ้าเกิด error
-      if (connectionTimeoutRef.current) {
-        clearTimeout(connectionTimeoutRef.current);
-        connectionTimeoutRef.current = null;
-      }
+      setStatus(`❌ ${error.message || error}`);
+      console.error('การเชื่อมต่อ SIP ล้มเหลว:', error);
+      Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่');
     }
   };
 
@@ -1788,14 +1752,14 @@ export default function App() {
     }, 1000);
   };
 
-  // ฟังก์ชันโทรออก
+  // ฟังก์ชันโทรออก (Mock Version)
   const makeCall = async callNumber => {
     if (!callNumber.trim()) {
       Alert.alert('ข้อผิดพลาด', 'กรุณาใส่หมายเลขที่ต้องการโทร');
       return;
     }
 
-    if (!isConnected || !accountRef) {
+    if (!isConnected) {
       Alert.alert('ข้อผิดพลาด', 'กรุณาเชื่อมต่อ SIP ก่อน');
       return;
     }
@@ -1803,80 +1767,65 @@ export default function App() {
     try {
       setCallStatus('📞 เริ่มโทร...');
       setCurrentCallNumber(callNumber);
-      setIsInCall(true); // ตั้งสถานะให้เป็น in call เมื่อเริ่มโทร
+      setIsInCall(true);
 
       // ตั้งค่า audio mode ก่อนโทร
       AudioHelper.setCallAudioMode();
 
-      const callUri = `sip:${callNumber}@${config.domain}`;
-      console.log('📞 โทรออกไปยัง:', callUri);
+      console.log('📞 โทรออกไปยัง (Mock):', callNumber);
 
-      const call = await endpointRef.makeCall(accountRef, callUri);
-      // เมื่อ call เชื่อมต่อแล้ว library จะจัดการส่งเสียงระหว่างอุปกรณ์ให้เอง
-      setCurrentCallRef(call);
-      setIsHold(false); // รีเซ็ต hold state เมื่อเริ่มโทรใหม่
+      // ใช้ mock service แทน
+      const callId = mockSipService.makeCall('mock_account', callNumber);
+      setCurrentCall(callId);
+      setIsHold(false);
       setCallStatus('📞 กำลังเชื่อมต่อ...');
 
-      console.log('✅ เริ่มโทรออกสำเร็จ - สามารถโอนสายได้');
+      console.log('✅ เริ่มโทรออกสำเร็จ (Mock)');
 
-      // เพิ่มการตรวจสอบไมค์หลังจากโทรออก
-      if (call) {
-        setTimeout(() => {
-          AudioHelper.checkAndFixMicrophone(call);
-          AudioHelper.forceMicrophoneEnable(call);
-        }, 2000); // รอ 2 วินาทีหลังจากโทรออกแล้วค่อยตรวจสอบ
-      }
     } catch (error) {
       setCallStatus('❌ โทรไม่สำเร็จ');
-      setIsInCall(false); // รีเซ็ตสถานะเมื่อโทรไม่สำเร็จ
+      setIsInCall(false);
       Alert.alert('ข้อผิดพลาด', `ไม่สามารถโทรได้: ${error.message}`);
       setTimeout(() => setCallStatus(''), 3000);
     }
   };
 
-  // ฟังก์ชันวางสาย
+  // ฟังก์ชันวางสาย (Mock Version)
   const hangupCall = async () => {
     try {
-      // ตรวจสอบว่ามีสายที่กำลังใช้งานอยู่หรือไม่
-      if (!currentCallRef) {
+      if (!currentCall) {
         console.log('ไม่พบสายที่กำลังใช้งาน');
         setCallStatus('❌ ไม่มีสายที่ต้องวาง');
         setTimeout(() => setCallStatus(''), 2000);
         return;
       }
 
-      console.log('กำลังวางสาย...');
+      console.log('กำลังวางสาย (Mock)...');
       setCallStatus('📞 กำลังวางสาย...');
 
       // รีเซ็ต audio mode ก่อนวางสาย
       AudioHelper.resetAudioMode();
 
-      try {
-        let cancelled = false;
+      // ใช้ mock service
+      mockSipService.hangupCall(currentCall);
+      
+      // รีเซ็ตสถานะ
+      setCurrentCall(null);
+      setCurrentCallRef(null);
+      setCurrentCallNumber('');
+      setIsInCall(false);
+      setIsHold(false);
+      setCallStatus('✅ วางสายแล้ว');
+      
+      console.log('✅ วางสายสำเร็จ (Mock)');
+      setTimeout(() => setCallStatus(''), 2000);
 
-        // วิธีที่ 1: ใช้ currentCallRef.hangup()
-        if (
-          !cancelled &&
-          currentCallRef &&
-          typeof currentCallRef.hangup === 'function'
-        ) {
-          try {
-            await currentCallRef.hangup();
-            console.log('✅ Call cancelled via currentCallRef.hangup()');
-            cancelled = true;
-          } catch (error) {
-            console.log('❌ currentCallRef.hangup() failed:', error);
-          }
-        }
-
-        // วิธีที่ 2: ใช้ endpointRef.hangupCall() กับ call object
-        if (!cancelled && endpointRef && endpointRef.hangupCall) {
-          try {
-            await endpointRef.hangupCall(currentCallRef);
-            console.log('✅ Call cancelled via endpoint.hangupCall');
-            cancelled = true;
-          } catch (error) {
-            console.log('❌ endpoint.hangupCall failed:', error);
+    } catch (error) {
+      console.error('ข้อผิดพลาดในการวางสาย:', error);
+      setCallStatus('❌ วางสายไม่สำเร็จ');
+      setTimeout(() => setCallStatus(''), 2000);
+    }
+  };
           }
         }
 
