@@ -12,7 +12,7 @@ import {
   Linking,
   Dimensions,
 } from 'react-native';
-import { useContacts } from './useContacts';
+import { useContacts } from '../useContacts';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 const { width } = Dimensions.get('window');
@@ -21,34 +21,7 @@ const ContactScreen = ({ navigation, makeCall, setCurrentCallNumber }) => {
   const { contacts, loading, error, deleteContact } = useContacts();
   const [searchTerm, setSearchTerm] = useState('');
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerTitle: 'รายชื่อผู้ติดต่อ',
-      headerTitleStyle: {
-        fontWeight: '700',
-        fontSize: 18,
-        color: '#1a1a1a',
-      },
-      headerStyle: {
-        backgroundColor: '#fff',
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-      },
-      headerRight: () => (
-        <TouchableOpacity
-          onPress={() => navigation.navigate('AddContact')}
-          style={styles.headerButton}
-        >
-          <View style={styles.addButtonContainer}>
-            <Icon name="add" size={20} color="#fff" />
-          </View>
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation]);
+  // Removed useLayoutEffect to allow header to show
 
   if (loading) {
     return (
@@ -179,6 +152,23 @@ const ContactScreen = ({ navigation, makeCall, setCurrentCallNumber }) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Custom Back Button Header */}
+      <View style={styles.customHeader}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Icon name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>ผู้ติดต่อ</Text>
+        <TouchableOpacity 
+          style={styles.addButton}
+          onPress={() => navigation.navigate('AddContact')}
+        >
+          <Icon name="add" size={24} color="#fff" />
+        </TouchableOpacity>
+      </View>
+      
       <View style={styles.header}>
         <View style={styles.searchContainer}>
           <Icon
@@ -294,6 +284,33 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     textAlign: 'center',
     lineHeight: 22,
+  },
+  customHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 16,
+  },
+  addButton: {
+    padding: 8,
   },
   header: {
     backgroundColor: '#fff',

@@ -10,13 +10,14 @@ import {
   Modal,
   ActivityIndicator,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import {
   saveCallHistory,
   subscribeToCallHistory,
   deleteCallHistory,
-} from './services/callHistoryService';
+} from '../services/callHistoryService';
 
 const DIAL_BUTTONS = [
   [
@@ -58,6 +59,24 @@ const ConvergenceScreen = ({
   const [callHistory, setCallHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [screenData, setScreenData] = useState(Dimensions.get('window'));
+
+  // Listen for screen size changes
+  useEffect(() => {
+    const onChange = (result) => {
+      setScreenData(result.window);
+    };
+    
+    const subscription = Dimensions.addEventListener('change', onChange);
+    return () => subscription?.remove();
+  }, []);
+
+  // Responsive values based on screen size
+  const { width, height } = screenData;
+  const isSmallDevice = width < 350;      // เครื่องเล็ก
+  const isMediumDevice = width >= 350 && width < 400;  // เครื่องขนาดกลาง
+  const isLargeDevice = width >= 400;     // เครื่องใหญ่
+  const isLandscape = width > height;
 
   // Subscribe to call history updates from Firestore
   useEffect(() => {
@@ -147,31 +166,94 @@ const ConvergenceScreen = ({
   return (
     <View style={styles.container}>
       {/* Header with Convergence Logo */}
-      <View style={styles.header}>
+      <View style={[
+        styles.header,
+        {
+          paddingTop: isSmallDevice ? 40 : isMediumDevice ? 45 : 50,
+          paddingBottom: isSmallDevice ? 15 : isMediumDevice ? 18 : 20,
+          paddingHorizontal: isSmallDevice ? 15 : isMediumDevice ? 18 : 20,
+        }
+      ]}>
         <View style={styles.headerContent}>
-          <View style={styles.logoContainer}>
-            <Text style={styles.logoText}>C</Text>
+          <View style={[
+            styles.logoContainer,
+            {
+              width: isSmallDevice ? 35 : isMediumDevice ? 40 : 45,
+              height: isSmallDevice ? 35 : isMediumDevice ? 40 : 45,
+              borderRadius: isSmallDevice ? 17.5 : isMediumDevice ? 20 : 22.5,
+            }
+          ]}>
+            <Text style={[
+              styles.logoText,
+              {
+                fontSize: isSmallDevice ? 18 : isMediumDevice ? 21 : 24,
+              }
+            ]}>C</Text>
           </View>
           <View style={styles.titleContainer}>
-            <Text style={styles.headerTitle}>Convergence</Text>
-            <Text style={styles.headerSubtitle}>SIP Softphone</Text>
+            <Text style={[
+              styles.headerTitle,
+              {
+                fontSize: isSmallDevice ? 18 : isMediumDevice ? 20 : 22,
+              }
+            ]}>Convergence</Text>
+            <Text style={[
+              styles.headerSubtitle,
+              {
+                fontSize: isSmallDevice ? 11 : isMediumDevice ? 12 : 14,
+              }
+            ]}>SIP Softphone</Text>
           </View>
         </View>
-        <View style={styles.statusIndicator}>
+        <View style={[
+          styles.statusIndicator,
+          {
+            paddingHorizontal: isSmallDevice ? 8 : isMediumDevice ? 10 : 12,
+            paddingVertical: isSmallDevice ? 4 : isMediumDevice ? 5 : 6,
+          }
+        ]}>
           <View style={[
             styles.statusDot,
+            {
+              width: isSmallDevice ? 8 : isMediumDevice ? 9 : 10,
+              height: isSmallDevice ? 8 : isMediumDevice ? 9 : 10,
+              borderRadius: isSmallDevice ? 4 : isMediumDevice ? 4.5 : 5,
+            },
             isConnected ? styles.statusOnline : styles.statusOffline
           ]} />
-          <Text style={styles.statusText}>
+          <Text style={[
+            styles.statusText,
+            {
+              fontSize: isSmallDevice ? 10 : isMediumDevice ? 11 : 12,
+              marginLeft: isSmallDevice ? 4 : isMediumDevice ? 5 : 6,
+            }
+          ]}>
             {isConnected ? 'Connected' : 'Offline'}
           </Text>
         </View>
       </View>
 
-      <View style={styles.topSection}>
-        <View style={styles.numberInputContainer}>
+      <View style={[
+        styles.topSection,
+        {
+          paddingTop: isSmallDevice ? 25 : isMediumDevice ? 35 : 40,
+          paddingHorizontal: isSmallDevice ? 15 : isMediumDevice ? 18 : 20,
+        }
+      ]}>
+        <View style={[
+          styles.numberInputContainer,
+          {
+            marginHorizontal: isSmallDevice ? 20 : isMediumDevice ? 25 : 30,
+          }
+        ]}>
           <TextInput
-            style={styles.phoneInput}
+            style={[
+              styles.phoneInput,
+              {
+                fontSize: isSmallDevice ? 16 : isMediumDevice ? 18 : 20,
+                letterSpacing: isSmallDevice ? 2 : isMediumDevice ? 3 : 4,
+              }
+            ]}
             placeholder="Enter numbers"
             placeholderTextColor="#ccc"
             keyboardType="phone-pad"
@@ -185,7 +267,13 @@ const ConvergenceScreen = ({
             onPress={handleDelete}
             onLongPress={handleClearNumber}
           >
-            <Text style={styles.deleteButtonText}>⌫</Text>
+            <Text style={[
+              styles.deleteButtonText,
+              {
+                fontSize: isSmallDevice ? 20 : isMediumDevice ? 22 : 25,
+                marginLeft: isSmallDevice ? 20 : isMediumDevice ? 25 : 30,
+              }
+            ]}>⌫</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -193,35 +281,103 @@ const ConvergenceScreen = ({
       <View style={styles.centerSection}>
         <View style={styles.dialPad}>
           {DIAL_BUTTONS.map((row, rowIdx) => (
-            <View key={rowIdx} style={styles.dialRow}>
+            <View key={rowIdx} style={[
+              styles.dialRow,
+              {
+                marginBottom: isSmallDevice ? 10 : isMediumDevice ? 12 : 15,
+              }
+            ]}>
               {row.map((item, idx) => (
                 <TouchableOpacity
                   key={idx}
-                  style={styles.dialButton}
+                  style={[
+                    styles.dialButton,
+                    {
+                      width: isSmallDevice ? 65 : isMediumDevice ? 72 : 80,
+                      height: isSmallDevice ? 65 : isMediumDevice ? 72 : 80,
+                      marginHorizontal: isSmallDevice ? 8 : isMediumDevice ? 9 : 10,
+                      borderRadius: isSmallDevice ? 32.5 : isMediumDevice ? 36 : 40,
+                    }
+                  ]}
                   onPress={() => handlePress(item.main)}
                   disabled={!!isInCall}
                 >
-                  <Text style={styles.dialMain}>{item.main}</Text>
-                  {!!item.sub && <Text style={styles.dialSub}>{item.sub}</Text>}
+                  <Text style={[
+                    styles.dialMain,
+                    {
+                      fontSize: isSmallDevice ? 24 : isMediumDevice ? 27 : 30,
+                    }
+                  ]}>{item.main}</Text>
+                  {!!item.sub && (
+                    <Text style={[
+                      styles.dialSub,
+                      {
+                        fontSize: isSmallDevice ? 10 : isMediumDevice ? 11 : 12,
+                      }
+                    ]}>{item.sub}</Text>
+                  )}
                 </TouchableOpacity>
               ))}
             </View>
           ))}
 
-          <View style={styles.sipContainer}>
-            <TouchableOpacity style={styles.sipCallButton} onPress={handleCall}>
-              <Text style={styles.callIcon}>📞</Text>
+          <View style={[
+            styles.sipContainer,
+            {
+              marginTop: isSmallDevice ? 15 : isMediumDevice ? 5 : 10,
+            }
+          ]}>
+            <TouchableOpacity 
+              style={[
+                styles.sipCallButton,
+                {
+                  width: isSmallDevice ? 65 : isMediumDevice ? 72 : 80,
+                  height: isSmallDevice ? 65 : isMediumDevice ? 72 : 80,
+                  borderRadius: isSmallDevice ? 12 : isMediumDevice ? 14 : 16,
+                  marginRight: isSmallDevice ? 12 : isMediumDevice ? 13 : 15,
+                }
+              ]} 
+              onPress={handleCall}
+            >
+              <Text style={[
+                styles.callIcon,
+                {
+                  fontSize: isSmallDevice ? 24 : isMediumDevice ? 27 : 30,
+                }
+              ]}>📞</Text>
             </TouchableOpacity>
 
-            <View style={styles.sipStatusBox}>
-              <Text style={styles.sipTitle}>Call with SIP</Text>
+            <View style={[
+              styles.sipStatusBox,
+              {
+                width: isSmallDevice ? 150 : isMediumDevice ? 165 : 180,
+                padding: isSmallDevice ? 12 : isMediumDevice ? 13 : 15,
+                borderRadius: isSmallDevice ? 10 : isMediumDevice ? 11 : 12,
+              }
+            ]}>
+              <Text style={[
+                styles.sipTitle,
+                {
+                  fontSize: isSmallDevice ? 12 : isMediumDevice ? 13 : 14,
+                }
+              ]}>Call with SIP</Text>
               <View style={styles.sipRow}>
-                <Text style={styles.sipLabel}>
+                <Text style={[
+                  styles.sipLabel,
+                  {
+                    fontSize: isSmallDevice ? 12 : isMediumDevice ? 13 : 14,
+                  }
+                ]}>
                   {isConnected && config?.username ? config.username : 'ไม่ได้เชื่อมต่อ'}
                 </Text>
                 <View
                   style={[
                     styles.statusDot,
+                    {
+                      width: isSmallDevice ? 8 : isMediumDevice ? 9 : 10,
+                      height: isSmallDevice ? 8 : isMediumDevice ? 9 : 10,
+                      borderRadius: isSmallDevice ? 4 : isMediumDevice ? 4.5 : 5,
+                    },
                     isConnected ? styles.statusOnline : styles.statusOffline,
                   ]}
                 />
@@ -232,28 +388,64 @@ const ConvergenceScreen = ({
       </View>
 
       {/* Bottom Menu */}
-      <View style={styles.bottomMenu}>
+      <View style={[
+        styles.bottomMenu,
+        {
+          paddingVertical: isSmallDevice ? 8 : isMediumDevice ? 9 : 10,
+          paddingHorizontal: isSmallDevice ? 15 : isMediumDevice ? 18 : 20,
+        }
+      ]}>
         <TouchableOpacity
-          style={styles.menuItem}
+          style={[
+            styles.menuItem,
+            {
+              paddingVertical: isSmallDevice ? 6 : isMediumDevice ? 7 : 8,
+              paddingHorizontal: isSmallDevice ? 12 : isMediumDevice ? 14 : 16,
+            }
+          ]}
           onPress={() => navigation.navigate('Contacts')}
         >
-          <Icon name="people-outline" size={24} color="#2665e4ff" />
+          <Icon 
+            name="people-outline" 
+            size={isSmallDevice ? 20 : isMediumDevice ? 22 : 24} 
+            color="#2665e4ff" 
+          />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.menuItem}
+          style={[
+            styles.menuItem,
+            {
+              paddingVertical: isSmallDevice ? 6 : isMediumDevice ? 7 : 8,
+              paddingHorizontal: isSmallDevice ? 12 : isMediumDevice ? 14 : 16,
+            }
+          ]}
           onPress={() => {
             setShowHistory(true);
           }}
         >
-          <Icon name="time-outline" size={24} color="#2665e4ff" />
+          <Icon 
+            name="time-outline" 
+            size={isSmallDevice ? 20 : isMediumDevice ? 22 : 24} 
+            color="#2665e4ff" 
+          />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.menuItem}
+          style={[
+            styles.menuItem,
+            {
+              paddingVertical: isSmallDevice ? 6 : isMediumDevice ? 7 : 8,
+              paddingHorizontal: isSmallDevice ? 12 : isMediumDevice ? 14 : 16,
+            }
+          ]}
           onPress={() => navigation.navigate('SIPConnector')}
         >
-          <Icon name="settings-outline" size={24} color="#2665e4ff" />
+          <Icon 
+            name="settings-outline" 
+            size={isSmallDevice ? 20 : isMediumDevice ? 22 : 24} 
+            color="#2665e4ff" 
+          />
         </TouchableOpacity>
       </View>
       {/* Call History Modal */}
@@ -592,11 +784,8 @@ const styles = StyleSheet.create({
   dialPad: { alignItems: 'center', justifyContent: 'center' },
   dialRow: { flexDirection: 'row', marginBottom: 15 },
   dialButton: {
-    width: 80,
-    height: 80,
-    justifyContent: 'center',
+    justifyContent: 'center', 
     alignItems: 'center',
-    marginHorizontal: 10,
     marginVertical: 5,
   },
   dialMain: {

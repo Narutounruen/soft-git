@@ -11,9 +11,15 @@ import {
   Animated,
   Alert,
 } from 'react-native';
-import { useContacts } from './useContacts';
+import { useContacts } from '../useContacts';
+import { AudioManager } from '../utils/AudioManager';
 
 const { width, height } = Dimensions.get('window');
+
+// Responsive breakpoints
+const isTablet = width > 768;
+const isSmallDevice = width < 350;
+
 const CallingScreen = ({
   navigation,
   hangupCall,
@@ -22,7 +28,6 @@ const CallingScreen = ({
   isInCall,
   isHold,
   currentCallNumber,
-  AudioHelper,
   showUnattendedTransferDialog,
   showAttendedTransferDialog,
   conference,
@@ -87,12 +92,6 @@ const CallingScreen = ({
     return colors[index];
   };
 
-  // ฟังก์ชันดึงชื่อที่จะแสดง
-  const getDisplayName = () => {
-    const contact = getCurrentContact();
-    return contact ? contact.name : (currentCallNumber || 'ไม่ทราบหมายเลข');
-  };
-
   // ฟังก์ชันดึงตัวอักษรสำหรับ avatar
   const getAvatarLetter = () => {
     const contact = getCurrentContact();
@@ -102,16 +101,22 @@ const CallingScreen = ({
     return currentCallNumber ? currentCallNumber.charAt(0) : '?';
   };
 
+  // ฟังก์ชันดึงชื่อที่จะแสดง
+  const getDisplayName = () => {
+    const contact = getCurrentContact();
+    return contact ? contact.name : (currentCallNumber || 'ไม่ทราบหมายเลข');
+  };
+
   const handleHangup = async () => {
     try {
       // รีเซ็ตสถานะลำโพงและไมค์ก่อนวางสาย
-      if (isSpeakerOn && AudioHelper) {
-        await AudioHelper.disableSpeaker();
+      if (isSpeakerOn) {
+        await AudioManager.disableSpeaker();
         setIsSpeakerOn(false);
       }
 
-      if (isMuted && AudioHelper) {
-        await AudioHelper.unmuteMicrophone();
+      if (isMuted) {
+        await AudioManager.unmuteMicrophone();
         setIsMuted(false);
       }
 
@@ -128,16 +133,10 @@ const CallingScreen = ({
 
   const handleMute = async () => {
     try {
-      // ตรวจสอบว่ามี AudioHelper หรือไม่
-      if (!AudioHelper) {
-        console.log('❌ AudioHelper ไม่พร้อมใช้งาน');
-        Alert.alert('ข้อผิดพลาด', 'ระบบเสียงไม่พร้อมใช้งาน');
-        return;
-      }
 
       if (isMuted) {
         // เปิดไมค์ (unmute)
-        const success = await AudioHelper.unmuteMicrophone();
+        const success = await AudioManager.unmuteMicrophone();
         if (success) {
           setIsMuted(false);
           console.log('✅ เปิดไมค์แล้ว');
@@ -147,7 +146,7 @@ const CallingScreen = ({
         }
       } else {
         // ปิดไมค์ (mute)
-        const success = await AudioHelper.muteMicrophone();
+        const success = await AudioManager.muteMicrophone();
         if (success) {
           setIsMuted(true);
           console.log('✅ ปิดไมค์แล้ว');
@@ -164,15 +163,10 @@ const CallingScreen = ({
 
   const handleSpeaker = async () => {
     try {
-      // ตรวจสอบว่ามี AudioHelper หรือไม่
-      if (!AudioHelper) {
-        console.log('❌ AudioHelper ไม่พร้อมใช้งาน');
-        return;
-      }
 
       if (isSpeakerOn) {
         // ปิดลำโพง
-        const success = await AudioHelper.disableSpeaker();
+        const success = await AudioManager.disableSpeaker();
         if (success) {
           setIsSpeakerOn(false);
           console.log('✅ ปิดลำโพงแล้ว');
@@ -181,7 +175,7 @@ const CallingScreen = ({
         }
       } else {
         // เปิดลำโพง
-        const enableSuccess = await AudioHelper.enableSpeaker();
+        const enableSuccess = await AudioManager.enableSpeaker();
         if (enableSuccess) {
           setIsSpeakerOn(true);
           console.log('✅ เปิดลำโพงแล้ว');
@@ -302,9 +296,29 @@ const CallingScreen = ({
     return callStatus || 'กำลังเชื่อมต่อ...';
   };
 
+  // Responsive avatar styles
   const getAvatarStyle = () => {
-    return styles.avatarContainer;
+    const avatarSize = isTablet ? 140 : isSmallDevice ? 80 : 100;
+    const borderRadius = avatarSize / 2;
+    
+    return {
+      ...styles.avatarContainer,
+      width: avatarSize,
+      height: avatarSize,
+      borderRadius: borderRadius,
+    };
   };
+
+  const getAvatarTextStyle = () => {
+    const fontSize = isTablet ? 56 : isSmallDevice ? 32 : 40;
+    
+    return {
+      ...styles.avatarText,
+      fontSize: fontSize,
+    };
+  };
+
+
 
   return (
     <View style={styles.container}>
@@ -324,7 +338,7 @@ const CallingScreen = ({
       <View style={styles.callInfoContainer}>
         <View style={styles.avatarSection}>
           <View style={[getAvatarStyle(), { backgroundColor: getAvatarColor(getAvatarLetter()) }]}>
-            <Text style={styles.avatarText}>
+            <Text style={getAvatarTextStyle()}>
               {getAvatarLetter()}
             </Text>
           </View>
@@ -397,7 +411,7 @@ const CallingScreen = ({
             >
               <FontAwesome
                 name={isMuted ? 'microphone-slash' : 'microphone'}
-                size={24}
+                size={isTablet ? 28 : isSmallDevice ? 20 : 24}
                 color="00000037"
               />
             </View>
@@ -421,7 +435,7 @@ const CallingScreen = ({
             >
               <FontAwesome
                 name={isSpeakerOn ? 'volume-up' : 'volume-off'}
-                size={24}
+                size={isTablet ? 28 : isSmallDevice ? 20 : 24}
                 color="00000037"
               />
             </View>
@@ -435,7 +449,7 @@ const CallingScreen = ({
             onPress={handleTransfer}
           >
             <View style={styles.controlIcon}>
-              <MaterialIcons name="transform" size={24} color="00000037" />
+              <MaterialIcons name="transform" size={isTablet ? 28 : isSmallDevice ? 20 : 24} color="00000037" />
             </View>
             <Text style={styles.controlLabel}>โอนสาย</Text>
           </TouchableOpacity>
@@ -444,7 +458,7 @@ const CallingScreen = ({
         <View style={styles.controlRow}>
           <TouchableOpacity style={styles.controlButton} onPress={handleRecord}>
             <View style={styles.controlIcon}>
-              <MaterialCommunityIcons name="record" size={24} color="00000037" />
+              <MaterialCommunityIcons name="record" size={isTablet ? 28 : isSmallDevice ? 20 : 24} color="00000037" />
             </View>
             <Text style={styles.controlLabel}>อัดเสียง</Text>
           </TouchableOpacity>
@@ -458,7 +472,7 @@ const CallingScreen = ({
             >
               <MaterialIcons
                 name={isHold ? 'play-arrow' : 'pause'}
-                size={24}
+                size={isTablet ? 28 : isSmallDevice ? 20 : 24}
                 color="00000037"
               />
             </View>
@@ -482,7 +496,7 @@ const CallingScreen = ({
                 isInConference && styles.controlIconActive,
               ]}
             >
-              <MaterialIcons name="people" size={24} color="00000037" />
+              <MaterialIcons name="people" size={isTablet ? 28 : isSmallDevice ? 20 : 24} color="00000037" />
             </View>
             <Text style={styles.controlLabel}>
               {isInConference ? 'จัดการ Conference' : 'Conference'}
@@ -515,7 +529,7 @@ const CallingScreen = ({
           <View style={styles.hangupIcon}>
             <MaterialCommunityIcons
               name="phone-hangup"
-              size={36}
+              size={isTablet ? 44 : isSmallDevice ? 28 : 36}
               color="#fff"
             />
           </View>
@@ -592,15 +606,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   header: {
-    paddingTop: 16,
-    paddingBottom: 20,
+    paddingTop: isTablet ? 24 : 16,
+    paddingBottom: isTablet ? 30 : 20,
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
   },
   headerText: {
-    fontSize: 18,
+    fontSize: isTablet ? 22 : isSmallDevice ? 16 : 18,
     color: '#1A1B1E',
     fontWeight: '600',
     letterSpacing: 0.5,
@@ -609,18 +623,16 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: isTablet ? 40 : isSmallDevice ? 15 : 25,
     backgroundColor: '#FFFFFF',
   },
   avatarSection: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 40,
+    marginBottom: isTablet ? 30 : isSmallDevice ? 15 : 20,
   },
   avatarContainer: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
+    // Responsive sizing will be applied via getAvatarStyle()
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -630,7 +642,7 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   avatarText: {
-    fontSize: 64,
+    // Responsive sizing will be applied via getAvatarTextStyle()
     fontWeight: '700',
     color: '#ffffff',
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
@@ -640,54 +652,54 @@ const styles = StyleSheet.create({
   callerInfoSection: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 30,
+    marginBottom: isTablet ? 40 : isSmallDevice ? 20 : 30,
   },
   callerName: {
-    fontSize: 28,
+    fontSize: isTablet ? 34 : isSmallDevice ? 22 : 28,
     color: '#1A1B1E',
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: isTablet ? 12 : 8,
     textAlign: 'center',
   },
   callerPhone: {
-    fontSize: 16,
+    fontSize: isTablet ? 18 : isSmallDevice ? 14 : 16,
     color: '#8E8E93',
-    marginBottom: 8,
+    marginBottom: isTablet ? 12 : 8,
     textAlign: 'center',
   },
   callStatus: {
-    fontSize: 16,
+    fontSize: isTablet ? 18 : isSmallDevice ? 14 : 16,
     color: '#888888',
-    marginBottom: 15,
+    marginBottom: isTablet ? 20 : 15,
     textAlign: 'center',
   },
   callDuration: {
-    fontSize: 20,
+    fontSize: isTablet ? 24 : isSmallDevice ? 18 : 20,
     color: '#4A90E2',
     fontWeight: '600',
-    marginBottom: 10,
+    marginBottom: isTablet ? 15 : 10,
   },
   controlsContainer: {
-    paddingHorizontal: 40,
-    paddingBottom: 50,
+    paddingHorizontal: isTablet ? 60 : isSmallDevice ? 20 : 40,
+    paddingBottom: isTablet ? 70 : isSmallDevice ? 30 : 50,
     backgroundColor: '#FFFFFF',
   },
   controlRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: 25,
+    marginBottom: isTablet ? 35 : isSmallDevice ? 15 : 25,
   },
   controlButton: {
     alignItems: 'center',
     flex: 1,
-    marginHorizontal: 10, // <-- เว้นขอบซ้าย-ขวาแต่ละปุ่ม
-    marginVertical: 12, // <-- เว้นขอบบน-ล่างแต่ละปุ่ม
+    marginHorizontal: isTablet ? 15 : isSmallDevice ? 5 : 10,
+    marginVertical: isTablet ? 18 : isSmallDevice ? 8 : 12,
   },
   controlIcon: {
-    marginBottom: 16, // เว้นระยะกับข้อความ
+    marginBottom: isTablet ? 20 : isSmallDevice ? 12 : 16,
   },
   controlLabel: {
-    fontSize: 13,
+    fontSize: isTablet ? 15 : isSmallDevice ? 11 : 13,
     color: '#1A1B1E',
     textAlign: 'center',
     fontWeight: '500',
@@ -701,16 +713,16 @@ const styles = StyleSheet.create({
   },
   hangupButton: {
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: isTablet ? 30 : isSmallDevice ? 15 : 20,
   },
   hangupIcon: {
-    width: 85,
-    height: 85,
-    borderRadius: 42.5,
+    width: isTablet ? 100 : isSmallDevice ? 70 : 85,
+    height: isTablet ? 100 : isSmallDevice ? 70 : 85,
+    borderRadius: isTablet ? 50 : isSmallDevice ? 35 : 42.5,
     backgroundColor: '#E63946',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: isTablet ? 12 : 8,
     elevation: 6,
     shadowColor: '#E63946',
     shadowOffset: { width: 0, height: 4 },
@@ -726,18 +738,18 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   conferenceCount: {
-    fontSize: 14,
+    fontSize: isTablet ? 16 : isSmallDevice ? 12 : 14,
     color: '#4A90E2',
-    marginTop: 4,
+    marginTop: isTablet ? 6 : 4,
   },
   conferenceParticipants: {
-    marginTop: 20,
+    marginTop: isTablet ? 30 : isSmallDevice ? 15 : 20,
     alignItems: 'center',
   },
   participantsTitle: {
-    fontSize: 16,
+    fontSize: isTablet ? 18 : isSmallDevice ? 14 : 16,
     color: '#1A1B1E',
-    marginBottom: 15,
+    marginBottom: isTablet ? 20 : isSmallDevice ? 10 : 15,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -748,32 +760,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f0f8ff',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    marginVertical: 3,
-    borderRadius: 20,
+    paddingHorizontal: isTablet ? 20 : isSmallDevice ? 10 : 15,
+    paddingVertical: isTablet ? 12 : isSmallDevice ? 6 : 8,
+    marginVertical: isTablet ? 5 : 3,
+    borderRadius: isTablet ? 25 : 20,
     borderWidth: 1,
     borderColor: '#007AFF',
   },
   participantNumber: {
-    fontSize: 14,
+    fontSize: isTablet ? 16 : isSmallDevice ? 12 : 14,
     fontWeight: 'bold',
     color: '#333',
-    marginRight: 8,
+    marginRight: isTablet ? 12 : 8,
   },
   participantStatus: {
-    fontSize: 12,
+    fontSize: isTablet ? 14 : isSmallDevice ? 10 : 12,
   },
   conferenceInfo: {
     backgroundColor: '#e8f5e8',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 15,
-    borderLeftWidth: 4,
+    padding: isTablet ? 16 : isSmallDevice ? 8 : 12,
+    borderRadius: isTablet ? 12 : 8,
+    marginTop: isTablet ? 20 : 15,
+    borderLeftWidth: isTablet ? 6 : 4,
     borderLeftColor: '#27AE60',
   },
   conferenceStatusText: {
-    fontSize: 14,
+    fontSize: isTablet ? 16 : isSmallDevice ? 12 : 14,
     color: '#27AE60',
     fontWeight: '500',
     textAlign: 'center',
@@ -786,21 +798,21 @@ const styles = StyleSheet.create({
   conferenceControls: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginTop: 15,
-    marginBottom: 10,
+    marginTop: isTablet ? 20 : 15,
+    marginBottom: isTablet ? 15 : 10,
   },
   conferenceButton: {
     backgroundColor: '#4A90E2',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
+    paddingHorizontal: isTablet ? 25 : isSmallDevice ? 15 : 20,
+    paddingVertical: isTablet ? 16 : isSmallDevice ? 10 : 12,
+    borderRadius: isTablet ? 30 : 25,
     flex: 1,
-    marginHorizontal: 5,
+    marginHorizontal: isTablet ? 8 : 5,
     alignItems: 'center',
   },
   conferenceButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: isTablet ? 16 : isSmallDevice ? 12 : 14,
     fontWeight: '600',
   },
   modalOverlay: {
@@ -815,27 +827,27 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 15,
-    padding: 20,
-    width: '80%',
+    borderRadius: isTablet ? 20 : 15,
+    padding: isTablet ? 30 : isSmallDevice ? 15 : 20,
+    width: isTablet ? '70%' : isSmallDevice ? '90%' : '80%',
     maxHeight: '60%',
     borderWidth: 1,
     borderColor: '#E0E0E0',
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: isTablet ? 24 : isSmallDevice ? 18 : 20,
     color: '#1A1B1E',
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: isTablet ? 25 : 20,
   },
   modalBody: {
-    marginBottom: 20,
+    marginBottom: isTablet ? 25 : 20,
   },
   modalSubtitle: {
-    fontSize: 16,
+    fontSize: isTablet ? 18 : isSmallDevice ? 14 : 16,
     color: '#666',
-    marginBottom: 15,
+    marginBottom: isTablet ? 20 : 15,
     fontWeight: '600',
   },
   participantRow: {
@@ -843,40 +855,40 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: '#F4F6F8',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 10,
+    padding: isTablet ? 16 : isSmallDevice ? 10 : 12,
+    borderRadius: isTablet ? 15 : 10,
+    marginBottom: isTablet ? 15 : 10,
   },
   participantText: {
-    fontSize: 16,
+    fontSize: isTablet ? 18 : isSmallDevice ? 14 : 16,
     color: '#1A1B1E',
     flex: 1,
   },
   removeButtonText: {
-    fontSize: 16,
+    fontSize: isTablet ? 18 : isSmallDevice ? 14 : 16,
     color: '#E63946',
   },
   addParticipantButton: {
     backgroundColor: '#4A90E2',
-    padding: 15,
-    borderRadius: 10,
+    padding: isTablet ? 20 : isSmallDevice ? 12 : 15,
+    borderRadius: isTablet ? 15 : 10,
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: isTablet ? 15 : 10,
   },
   addParticipantText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: isTablet ? 18 : isSmallDevice ? 14 : 16,
     fontWeight: '600',
   },
   closeModalButton: {
     backgroundColor: '#E63946',
-    padding: 15,
-    borderRadius: 10,
+    padding: isTablet ? 20 : isSmallDevice ? 12 : 15,
+    borderRadius: isTablet ? 15 : 10,
     alignItems: 'center',
   },
   closeModalText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: isTablet ? 18 : isSmallDevice ? 14 : 16,
     fontWeight: '600',
   },
 });

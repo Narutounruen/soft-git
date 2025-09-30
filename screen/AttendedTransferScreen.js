@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import { AudioManager } from '../utils/AudioManager';
 
 const { width, height } = Dimensions.get('window');
 
@@ -17,7 +18,6 @@ const AttendedTransferScreen = ({
   navigation,
   route,
   transferManager, // PJSIPCallTransfer instance
-  AudioHelper,
 }) => {
   const { transferId, originalCall, consultCall, targetNumber } = route.params || {};
   
@@ -218,13 +218,13 @@ const AttendedTransferScreen = ({
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      {/* <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={handleBackToCall}>
           <MaterialIcons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>การโอนสายแบบปรึกษา</Text>
         <View style={styles.placeholder} />
-      </View>
+      </View> */}
 
       {/* Call Info */}
       <View style={styles.callInfoContainer}>

@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import firestore from '@react-native-firebase/firestore';
 import {
   View,
   Text,
@@ -12,10 +11,11 @@ import {
   TouchableOpacity,
   Vibration,
   NativeModules,
+  Modal,
+  AppState,
 } from 'react-native';
 import Sound from 'react-native-sound';
 import { Endpoint } from 'react-native-pjsip';
-import mockSipService from './services/mockSipService';
 import InCallManager from 'react-native-incall-manager';
 import 'react-native-gesture-handler';
 import { NavigationContainer, useFocusEffect } from '@react-navigation/native';
@@ -30,66 +30,101 @@ import AttendedTransferScreen from './AttendedTransferScreen';
 import PJSIPCallTransfer from './PJSIPCallTransfer';
 import ConferenceBridge from './ConferenceBridge';
 import { saveCallHistory } from './services/callHistoryService';
+import IncomingCallAlert from './IncomingCallAlert';
 
-// ตัวอย่างการเชื่อมต่อ Firestore
-  // --- Firestore: ดึงข้อมูล users มาแสดง ---
-  function useFirestoreUsers() {
-    const [users, setUsers] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
 
-    useEffect(() => {
-      const unsubscribe = firestore()
-        .collection('users')
-        .onSnapshot(
-          snapshot => {
-            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setUsers(data);
-            setLoading(false);
-          },
-          err => {
-            setError(err);
-            setLoading(false);
-          }
-        );
-      return () => unsubscribe();
-    }, []);
-    return { users, loading, error };
-  }
 
 // Helper functions สำหรับการจัดการ audio
 const AudioHelper = {
+  // ฟังก์ชันหยุดเสียงเรียกเข้าแบบครอบคลุมและติดตามผล
+  stopAllRingtones: (ringtoneRef) => {
+    // หยุดเสียงจาก Sound library
+    try {
+      if (ringtoneRef && ringtoneRef.current) {
+        if (ringtoneRef.current.isPlaying && ringtoneRef.current.isPlaying()) {
+          ringtoneRef.current.stop();
+        }
+        ringtoneRef.current.setNumberOfLoops(0); // หยุดการวนซ้ำ
+      }
+    } catch (soundError) {
+      console.error('Error stopping Sound library ringtone:', soundError);
+    }
+    
+    // หยุดการสั่น
+    try {
+      Vibration.cancel();
+    } catch (vibrationError) {
+      console.error('Error stopping vibration:', vibrationError);
+    }
+    
+    // หยุดเสียงจาก InCallManager (ลำดับสำคัญ)
+    try {
+      InCallManager.stopRingtone();
+    } catch (incallError) {
+      console.error('Error stopping InCallManager ringtone:', incallError);
+    }
+    
+    // รีเซ็ต InCallManager 
+    try {
+      InCallManager.stop({ busytone: '_DEFAULT_' });
+    } catch (resetError) {
+      console.error('Error resetting InCallManager:', resetError);
+    }
+    
+    // รีเซ็ต audio category กลับเป็นปกติ
+    try {
+      Sound.setCategory('Ambient');
+      Sound.setActive(false);
+      console.log('✅ รีเซ็ต Sound category เป็น Ambient');
+    } catch (categoryError) {
+      console.log('❌ Error resetting sound category:', categoryError);
+    }
+    
+    console.log('✅ เสร็จสิ้นการหยุดเสียงเรียกเข้าทุกแหล่ง');
+  },
+
+  // ฟังก์ชันหยุดเสียงเรียกเข้าแบบ persistent (ไม่ยอมแพ้จนกว่าจะหยุดจริง)
+  forceStopRingtones: (ringtoneRef, maxAttempts = 5) => {
+    let attempts = 0;
+    
+    const recursiveStop = () => {
+      attempts++;
+      AudioHelper.stopAllRingtones(ringtoneRef);
+      
+      // ตรวจสอบว่าเสียงยังคงเล่นอยู่หรือไม่
+      const isStillPlaying = ringtoneRef?.current?.isPlaying?.() || false;
+      
+      if (isStillPlaying && attempts < maxAttempts) {
+        setTimeout(recursiveStop, 200);
+      }
+    };
+    
+    recursiveStop();
+  },
+
   // ตั้งค่า audio mode สำหรับการโทร
   setCallAudioMode: () => {
-    console.log('🔊 เริ่มตั้งค่า audio mode สำหรับการโทร...');
-
     try {
       // ใช้ InCallManager เป็นหลัก
       AudioHelper.setCallAudioModeWithInCallManager();
 
       // สำหรับ React Native ใช้ Sound library เพื่อจัดการเสียงเพิ่มเติม
       Sound.setCategory('PlayAndRecord', true);
-      console.log('✅ Sound category set to PlayAndRecord');
 
       // ตั้งค่าเสียงให้เป็น active
       Sound.setActive(true);
-      console.log('✅ Audio session activated');
 
       // ใช้ Native Module สำหรับ Android
       if (Platform.OS === 'android' && NativeModules.AudioManagerModule) {
         NativeModules.AudioManagerModule.setCallAudioMode()
-          .then(result => {
-            console.log('✅ Native audio mode set:', result);
-          })
           .catch(error => {
-            console.log('❌ Native audio mode error:', error);
+            console.error('Native audio mode error:', error);
           });
       }
 
-      console.log('✅ Audio mode setup completed');
       return true;
     } catch (error) {
-      console.log('❌ Error setting call audio mode:', error);
+      console.error('Error setting call audio mode:', error);
       return false;
     }
   },
@@ -446,6 +481,12 @@ function HomeScreen({
   setCurrentCallNumber,
   config,
   setConfig,
+  setIncomingCallNumber,
+  setIncomingCallRef,
+  setShowIncomingCall,
+  incomingCallRef,
+  incomingCallNumber,
+  ringtoneRef,
 }) {
   // --- State และ ref สำหรับ HomeScreen เท่านั้น ---
   const [isConnecting, setIsConnecting] = useState(false);
@@ -454,8 +495,84 @@ function HomeScreen({
   const currentCallRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const transferManagerRef = useRef(null);
-  // Firestore users
-  const { users, loading: usersLoading, error: usersError } = useFirestoreUsers();
+
+  // ฟังก์ชันจัดการปุ่มรับสาย
+  const handleAcceptCall = async () => {
+    try {
+      const call = incomingCallRef;
+      
+      // หยุดเสียงเรียกเข้าแบบบังคับจนกว่าจะหยุดจริง
+      AudioHelper.forceStopRingtones(ringtoneRef);
+
+      // ซ่อน custom alert
+      setShowIncomingCall(false);
+
+      // ตั้งค่า audio mode ก่อนรับสาย
+      AudioHelper.setCallAudioMode();
+
+      // ตรวจสอบและรับสาย
+      let answered = false;
+
+      // วิธีที่ 1: call.answer()
+      if (!answered && call && typeof call.answer === 'function') {
+        try {
+          await call.answer();
+          console.log('✅ Call answered via call.answer()');
+          answered = true;
+        } catch (error) {
+          console.log('❌ call.answer() failed:', error);
+        }
+      }
+
+      // วิธีที่ 2: call.answerCall()
+      if (!answered && call && typeof call.answerCall === 'function') {
+        try {
+          await call.answerCall();
+          console.log('✅ Call answered via call.answerCall()');
+          answered = true;
+        } catch (error) {
+          console.log('❌ call.answerCall() failed:', error);
+        }
+      }
+
+      // วิธีที่ 3: endpoint.answerCall()
+      if (!answered && endpointRef.current && endpointRef.current.answerCall) {
+        try {
+          await endpointRef.current.answerCall(call);
+          console.log('✅ Call answered via endpoint.answerCall()');
+          answered = true;
+        } catch (error) {
+          console.log('❌ endpoint.answerCall() failed:', error);
+        }
+      }
+
+      if (!answered) {
+        throw new Error('ไม่สามารถรับสายได้ - ลองทุกวิธีแล้ว');
+      }
+
+      // ตรวจสอบว่าไมค์เปิดอยู่หรือไม่
+      try {
+        if (call && typeof call.mute === 'function') {
+          call.mute(false);
+          console.log('✅ Microphone explicitly unmuted');
+        }
+      } catch (muteError) {
+        console.log('❌ Error unmuting microphone:', muteError);
+      }
+
+      setIsInCall(true);
+      setCurrentCallRef(call);
+      setCurrentCallNumber(incomingCallNumber);
+      navigationRef?.navigate('Calling');
+    } catch (error) {
+      console.error('Error answering call:', error);
+      Alert.alert('ข้อผิดพลาด', 'ไม่สามารถรับสายได้');
+      setCallStatus('❌ ไม่สามารถรับสาย');
+      setTimeout(() => setCallStatus(''), 2000);
+    }
+  };
+
+
 
   // ทำความสะอาด
   const cleanup = async () => {
@@ -647,7 +764,7 @@ function HomeScreen({
     }
   };
 
-  // เชื่อมต่อ SIP (Mock Version)
+  // เชื่อมต่อ SIP
   const connectSIP = async () => {
     if (isConnecting) return;
     if (!config.domain || !config.username || !config.password) {
@@ -658,60 +775,89 @@ function HomeScreen({
     setIsConnecting(true);
     setIsConnected(false);
     setStatus('กำลังเชื่อมต่อ...');
+    await cleanup();
 
     try {
       // ขอสิทธิ์
       await requestPermissions();
 
-      console.log('🔄 เริ่มเชื่อมต่อ SIP (Mock)...');
-      
-      // สร้าง listener สำหรับ mock service
-      const handleSipEvent = (event, data) => {
-        console.log(`� SIP Event: ${event}`, data);
-        
-        if (event === 'registrationChanged') {
-          if (data.isRegistered) {
-            setIsConnected(true);
-            setIsConnecting(false);
-            setStatus('เชื่อมต่อแล้ว');
-            console.log('✅ เชื่อมต่อ SIP สำเร็จ (Mock)');
-          } else {
-            setIsConnected(false);
-            setStatus('ไม่สามารถเชื่อมต่อได้');
-            setIsConnecting(false);
-          }
-        } else if (event === 'callStateChanged') {
-          setCallStatus(`สถานะ: ${data.state}`);
-          if (data.state === 'CONNECTED') {
-            setCurrentCall(data.callId);
-          } else if (data.state === 'DISCONNECTED') {
-            setCurrentCall(null);
-            setCallStatus('');
-          }
-        }
+      // สร้าง Endpoint
+      endpointRef.current = new Endpoint();
+
+      // Define incoming call handler function
+      const handleIncomingCall = (remoteNumber, call) => {
+        setIncomingCallNumber(remoteNumber);
+        setIncomingCallRef(call);
+        setShowIncomingCall(true);
       };
 
-      // เพิ่ม listener
-      mockSipService.addListener(handleSipEvent);
-
-      // จำลองการลงทะเบียน
-      const accountId = mockSipService.addAccount({
-        username: config.username,
-        domain: config.domain,
-        password: config.password
+      // เริ่มต้น endpoint พร้อมตั้งค่าเพิ่มเติม
+      await endpointRef.current.start({
+        userAgent: 'Simple SIP Client',
+        logLevel: 5, // เพิ่มระดับการบันทึกล็อกเพื่อให้ง่ายต่อการแก้ไขปัญหา
+        logConfig: {
+          console: true,
+        },
       });
 
-      console.log(`🆔 Account ID: ${accountId}`);
+      // เริ่มต้น Transfer Manager
+      transferManagerRef.current = new PJSIPCallTransfer(endpointRef.current);
+      transferManagerRef.current.setupTransferCallbacks({
+        onTransferStarted: (callId, targetUri) => {
+          console.log(`🔄 การโอนสายเริ่มต้น: ${callId} -> ${targetUri}`);
+          setCallStatus('เริ่มการโอนสาย...');
+        },
+        onTransferCompleted: (callId, targetUri) => {
+          console.log(`✅ โอนสายสำเร็จ: ${callId} -> ${targetUri}`);
+          setCallStatus('โอนสายสำเร็จ');
+          setTimeout(() => setCallStatus(''), 3000);
+        },
+        onTransferFailed: (callId, targetUri, error) => {
+          console.log(`❌ โอนสายไม่สำเร็จ: ${callId} -> ${targetUri}, Error: ${error}`);
+          setCallStatus('โอนสายไม่สำเร็จ');
+          Alert.alert('ข้อผิดพลาด', `โอนสายไม่สำเร็จ: ${error}`);
+          setTimeout(() => setCallStatus(''), 3000);
+        },
+        onTransferProgress: (callId, status) => {
+          console.log(`📊 สถานะการโอนสาย: ${callId}, Status: ${status}`);
+          setCallStatus(`กำลังโอนสาย: ${status}`);
+        }
+      });
+      console.log('✅ Transfer Manager เริ่มต้นแล้ว');
 
-    } catch (error) {
-      setIsConnecting(false);
-      setStatus(`❌ ${error.message || error}`);
-      console.error('การเชื่อมต่อ SIP ล้มเหลว:', error);
-      Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่');
-    }
-  };
+      // ตั้ง timeout สำหรับการเชื่อมต่อ (30 วินาที)
+      connectionTimeoutRef.current = setTimeout(() => {
+        if (isConnecting) {
+          handleConnectionTimeout();
+        }
+      }, 30000);
 
-  // ฟังก์ชันโทรออก (Mock Version)
+      // จัดการ events
+      endpointRef.current.on('registration_changed', registration => {
+        // ยกเลิก timeout เมื่อได้ response
+        if (connectionTimeoutRef.current) {
+          clearTimeout(connectionTimeoutRef.current);
+          connectionTimeoutRef.current = null;
+        }
+
+        const regData = registration?._registration || registration;
+        const isActive = regData?._active || regData?.status === 'PJSIP_SC_OK';
+
+        setIsConnecting(false);
+        if (isActive) {
+          setIsConnected(true);
+          setStatus('✅ เชื่อมต่อสำเร็จ');
+          setAccountRef(accountRef.current);
+          setEndpointRef(endpointRef.current);
+
+          navigation.navigate('Softphone'); // <-- เพิ่มบรรทัดนี้
+        } else {
+          setIsConnected(false);
+          const reason =
+            regData?._reason || regData?._statusText || 'เชื่อมต่อไม่สำเร็จ';
+          setStatus(`❌ ${reason}`);
+        }
+      });
 
       // จัดการ call events
       // เตรียมเสียงเรียกเข้า
@@ -731,17 +877,17 @@ function HomeScreen({
         ios: '', // สำหรับ iOS ใช้ค่าว่างเพื่อให้หาในบันเดิล
       });
 
-      const ringtone = new Sound(soundPath, soundLocation, error => {
+      ringtoneRef.current = new Sound(soundPath, soundLocation, error => {
         if (error) {
           console.log('ไม่สามารถโหลดเสียงเรียกเข้าได้:', error);
           console.log('Error code:', error.code);
           console.log('Error description:', error.description);
         } else {
           console.log('เสียงเรียกเข้าพร้อมใช้งาน');
-          ringtone.setVolume(1.0);
+          ringtoneRef.current.setVolume(1.0);
           // เช็คว่าเสียงพร้อมเล่นหรือไม่
-          console.log('Is sound ready?', ringtone.isLoaded());
-          console.log('Sound duration:', ringtone.getDuration());
+          console.log('Is sound ready?', ringtoneRef.current.isLoaded());
+          console.log('Sound duration:', ringtoneRef.current.getDuration());
         }
       });
 
@@ -756,11 +902,28 @@ function HomeScreen({
           setCurrentCallNumber(remoteNumber);
           setCallStatus('📞 สายเรียกเข้า');
 
+          // บันทึกประวัติสายเข้าทันทีเมื่อมีสายเรียกเข้า
+          try {
+            console.log('📝 บันทึกประวัติสายเรียกเข้า:', remoteNumber);
+            saveCallHistory({
+              number: remoteNumber,
+              type: 'incoming',
+              status: 'ringing', // สถานะเริ่มต้นเป็นกำลังเรียก
+              timestamp: new Date().toISOString(),
+            }, 'default_user').then(() => {
+              console.log('✅ บันทึกประวัติสายเรียกเข้าสำเร็จ');
+            }).catch(error => {
+              console.error('❌ ไม่สามารถบันทึกประวัติสายเรียกเข้าได้:', error);
+            });
+          } catch (error) {
+            console.error('❌ ข้อผิดพลาดในการบันทึกประวัติสายเรียกเข้า:', error);
+          }
+
           // เล่นเสียงเรียกเข้า
-          if (ringtone.isLoaded()) {
-            ringtone.setVolume(1.0);
-            ringtone.setNumberOfLoops(-1); // เล่นซ้ำไปเรื่อยๆ
-            ringtone.play(success => {
+          if (ringtoneRef.current && ringtoneRef.current.isLoaded()) {
+            ringtoneRef.current.setVolume(1.0);
+            ringtoneRef.current.setNumberOfLoops(-1); // เล่นซ้ำไปเรื่อยๆ
+            ringtoneRef.current.play(success => {
               if (!success) {
                 console.log('การเล่นเสียงผิดพลาด');
               } else {
@@ -774,240 +937,9 @@ function HomeScreen({
           // สั่นเตือน: สั่น 500ms, หยุด 1000ms, วนซ้ำ
           const PATTERN = [500, 1000];
           Vibration.vibrate(PATTERN, true);
-          Alert.alert(
-            '📞 สายเรียกเข้า',
-            `จากหมายเลข: ${remoteNumber}`,
-            [
-              {
-                text: '❌ ปฏิเสธ',
-                onPress: async () => {
-                  try {
-                    // หยุดเสียงและการสั่น
-                    ringtone.stop();
-                    Vibration.cancel();
-
-                    console.log('กำลังปฏิเสธสาย...');
-                    setCallStatus('📞 กำลังปฏิเสธสาย...');
-
-                    let rejected = false;
-
-                    // วิธีที่ 1: ใช้ call.hangup()
-                    if (
-                      !rejected &&
-                      call &&
-                      typeof call.hangup === 'function'
-                    ) {
-                      try {
-                        await call.hangup();
-                        console.log('✅ Call rejected via call.hangup()');
-                        rejected = true;
-                      } catch (error) {
-                        console.log('❌ call.hangup() failed:', error);
-                      }
-                    }
-
-                    // วิธีที่ 2: ใช้ call.reject()
-                    if (
-                      !rejected &&
-                      call &&
-                      typeof call.reject === 'function'
-                    ) {
-                      try {
-                        await call.reject();
-                        console.log('✅ Call rejected via call.reject()');
-                        rejected = true;
-                      } catch (error) {
-                        console.log('❌ call.reject() failed:', error);
-                      }
-                    }
-
-                    // วิธีที่ 3: ใช้ endpointRef.current.hangupCall() กับ call object
-                    if (
-                      !rejected &&
-                      endpointRef.current &&
-                      endpointRef.current.hangupCall
-                    ) {
-                      try {
-                        await endpointRef.current.hangupCall(call);
-                        console.log('✅ Call rejected via endpoint.hangupCall');
-                        rejected = true;
-                      } catch (error) {
-                        console.log('❌ endpoint.hangupCall failed:', error);
-                      }
-                    }
-
-                    // วิธีที่ 4: ใช้ endpointRef.current.hangupCall() กับ callId
-                    if (
-                      !rejected &&
-                      call &&
-                      call._callId &&
-                      endpointRef.current
-                    ) {
-                      try {
-                        await endpointRef.current.hangupCall(call._callId);
-                        console.log(
-                          '✅ Call rejected via endpoint.hangupCall with _callId',
-                        );
-                        rejected = true;
-                      } catch (error) {
-                        console.log(
-                          '❌ endpoint.hangupCall with _callId failed:',
-                          error,
-                        );
-                      }
-                    }
-
-                    // วิธีที่ 5: ใช้ call.terminate()
-                    if (
-                      !rejected &&
-                      call &&
-                      typeof call.terminate === 'function'
-                    ) {
-                      try {
-                        await call.terminate();
-                        console.log('✅ Call rejected via call.terminate()');
-                        rejected = true;
-                      } catch (error) {
-                        console.log('❌ call.terminate() failed:', error);
-                      }
-                    }
-
-                    if (!rejected) {
-                      console.log(
-                        '⚠️ ไม่สามารถปฏิเสธสายได้: ไม่พบฟังก์ชันปฏิเสธสายที่ทำงานได้',
-                      );
-                    }
-
-                    setCallStatus('📞 ปฏิเสธสายแล้ว');
-                    setTimeout(() => setCallStatus(''), 2000);
-                  } catch (error) {
-                    console.error('ไม่สามารถปฏิเสธสายได้:', error);
-                    setCallStatus('❌ ไม่สามารถปฏิเสธสาย');
-                    setTimeout(() => setCallStatus(''), 2000);
-                  }
-                },
-                style: 'cancel',
-              },
-              {
-                text: '✅ รับสาย',
-                onPress: async () => {
-                  try {
-                    // หยุดเสียงและการสั่น
-                    ringtone.stop();
-                    Vibration.cancel();
-
-                    // ตั้งค่า audio mode ก่อนรับสาย
-                    AudioHelper.setCallAudioMode();
-
-                    // ตรวจสอบและรับสาย
-                    let answered = false;
-
-                    // วิธีที่ 1: call.answer()
-                    if (
-                      !answered &&
-                      call &&
-                      typeof call.answer === 'function'
-                    ) {
-                      try {
-                        await call.answer();
-                        console.log('✅ Call answered via call.answer()');
-                        answered = true;
-                      } catch (error) {
-                        console.log('❌ call.answer() failed:', error);
-                      }
-                    }
-
-                    // วิธีที่ 2: call.answerCall()
-                    if (
-                      !answered &&
-                      call &&
-                      typeof call.answerCall === 'function'
-                    ) {
-                      try {
-                        await call.answerCall();
-                        console.log('✅ Call answered via call.answerCall()');
-                        answered = true;
-                      } catch (error) {
-                        console.log('❌ call.answerCall() failed:', error);
-                      }
-                    }
-
-                    // วิธีที่ 3: endpoint.answerCall()
-                    if (
-                      !answered &&
-                      endpointRef.current &&
-                      endpointRef.current.answerCall
-                    ) {
-                      try {
-                        await endpointRef.current.answerCall(call);
-                        console.log(
-                          '✅ Call answered via endpoint.answerCall()',
-                        );
-                        answered = true;
-                      } catch (error) {
-                        console.log('❌ endpoint.answerCall() failed:', error);
-                      }
-                    }
-
-                    if (!answered) {
-                      throw new Error('ไม่สามารถรับสายได้ - ลองทุกวิธีแล้ว');
-                    }
-
-                    // ตรวจสอบว่าไมค์เปิดอยู่หรือไม่
-                    try {
-                      if (call && typeof call.mute === 'function') {
-                        call.mute(false); // ตรวจสอบให้แน่ใจว่าไมค์เปิดอยู่
-                        console.log('✅ Microphone explicitly unmuted');
-                      }
-                    } catch (muteError) {
-                      console.log('❌ Error unmuting microphone:', muteError);
-                    }
-
-                    setIsInCall(true);
-                    setCurrentCallRef(call);
-                    navigation.navigate('Calling');
-                  } catch (error) {
-                    console.error('Error answering call:', error);
-                    Alert.alert('ข้อผิดพลาด', 'ไม่สามารถรับสายได้');
-                    // ทำความสะอาดหากเกิดข้อผิดพลาด
-                    ringtone.stop();
-                    Vibration.cancel();
-                    setCallStatus('❌ ไม่สามารถรับสาย');
-                    setTimeout(() => setCallStatus(''), 2000);
-                  }
-                },
-              },
-            ],
-            {
-              cancelable: false,
-              onDismiss: () => {
-                // กรณีที่ Alert ถูกปิดด้วยวิธีอื่น
-                ringtone.stop();
-                Vibration.cancel();
-              },
-            },
-          );
-        }
-      });
-
-      // เพิ่ม handler สำหรับ incoming_call
-      endpointRef.current.on('incoming_call', call => {
-        console.log('Incoming call event:', call);
-        if (call) {
-          setCurrentCallRef(call);
           
-          // บันทึกประวัติสายเข้า
-          const incomingNumber = call?.remoteContact || call?.remoteNumber || 'Unknown';
-          try {
-            saveCallHistory({
-              number: incomingNumber,
-              type: 'incoming',
-            }, 'default_user').catch(error => {
-              console.error('Failed to save incoming call history:', error);
-            });
-          } catch (error) {
-            console.error('Error saving incoming call history:', error);
-          }
+          // แสดง custom incoming call alert
+          handleIncomingCall(remoteNumber, call);
         }
       });
 
@@ -1046,6 +978,10 @@ function HomeScreen({
         } else if (state === 'PJSIP_INV_STATE_EARLY') {
           setCallStatus('📞 กำลังเรียก...');
         } else if (state === 'PJSIP_INV_STATE_CONFIRMED') {
+          // หยุดเสียงเรียกเข้าทุกแหล่งทันทีเมื่อสายเชื่อมต่อ
+          AudioHelper.stopAllRingtones(ringtoneRef);
+          setShowIncomingCall(false);
+
           setCallStatus('📞 สายเชื่อมต่อแล้ว');
           setIsInCall(true);
           if (call) {
@@ -1076,6 +1012,10 @@ function HomeScreen({
             }
           }
         } else if (state === 'PJSIP_INV_STATE_DISCONNECTED') {
+          // หยุดเสียงเรียกเข้าทุกแหล่งทันทีเมื่อสายถูกตัด
+          AudioHelper.stopAllRingtones(ringtoneRef);
+          setShowIncomingCall(false);
+
           // ตรวจสอบสาเหตุการวางสาย
           let disconnectReason = '';
           if (lastStatus === 487) {
@@ -1104,6 +1044,35 @@ function HomeScreen({
 
           // รีเซ็ต audio mode เมื่อสายถูกตัด
           AudioHelper.resetAudioMode();
+
+          // อัปเดตประวัติการโทรเมื่อสายถูกตัด
+          try {
+            const callNumber = currentCallRef.current?.getRemoteUri?.()?.split('@')[0]?.replace('sip:', '') || 'Unknown';
+            let historyStatus = 'ended';
+            
+            // กำหนดสถานะตามเหตุผลการตัดสาย
+            if (lastStatus === 487 || lastStatus === 486 || lastStatus === 600 || lastStatus === 603) {
+              historyStatus = 'declined';
+            } else if (lastStatus === 480 || lastStatus === 408) {
+              historyStatus = 'missed';
+            } else if (lastStatus === 200) {
+              historyStatus = 'completed';
+            }
+
+            console.log('📝 อัปเดตประวัติการโทรเมื่อสายถูกตัด:', { callNumber, historyStatus, lastStatus });
+            saveCallHistory({
+              number: callNumber,
+              type: 'incoming',
+              status: historyStatus,
+              timestamp: new Date().toISOString(),
+            }, 'default_user').then(() => {
+              console.log('✅ อัปเดตประวัติการโทรสำเร็จ (สายถูกตัด)');
+            }).catch(error => {
+              console.error('❌ ไม่สามารถอัปเดตประวัติการโทรได้:', error);
+            });
+          } catch (error) {
+            console.error('❌ ข้อผิดพลาดในการอัปเดตประวัติการโทร:', error);
+          }
 
           setCallStatus(`📞 ${disconnectReason}`);
           setIsInCall(false);
@@ -1159,10 +1128,16 @@ function HomeScreen({
       endpointRef.current.on('call_terminated', call => {
         console.log('Call terminated event received:', call);
 
+        // หยุดเสียงเรียกเข้าทุกแหล่งทันทีเมื่อสายถูกตัด
+        AudioHelper.stopAllRingtones(ringtoneRef);
+        setShowIncomingCall(false);
+
         // ตรวจสอบสถานะการโทรปัจจุบัน
         console.log('Current call state before termination:', {
           hasCurrentCallRef: !!currentCallRef.current,
         });
+
+        // หมายเหตุ: การอัปเดตประวัติการโทรทำไว้ด้านบนแล้วตามสถานะของการโทร
 
         // บังคับให้ระบบทราบว่าสายถูกตัดแล้ว ไม่ว่าจะด้วยเหตุผลใด
         setCallStatus('📞 สายถูกตัดจากอีกฝ่าย');
@@ -1317,13 +1292,28 @@ function HomeScreen({
             audioMode: 'communication', // เปลี่ยนเป็น communication
             audioQuality: 'default', // ใช้ default แทน high
 
-      console.log(`🆔 Account ID: ${accountId}`);
+            // การตั้งค่าเพิ่มเติมสำหรับ PJSIP
+            clockRate: 8000, // Clock rate สำหรับ audio
+            ptime: 20, // Packet time 20ms
+            maxptime: 20, // Maximum packet time
+          },
+        },
+      };
 
+      accountRef.current = await endpointRef.current.createAccount(
+        accountConfig,
+      );
     } catch (error) {
       setIsConnecting(false);
-      setStatus(`❌ ${error.message || error}`);
-      console.error('การเชื่อมต่อ SIP ล้มเหลว:', error);
-      Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อได้ กรุณาลองใหม่');
+      setIsConnected(false);
+      setStatus(`❌ ผิดพลาด: ${error.message}`);
+      Alert.alert('ผิดพลาด', error.message);
+
+      // ยกเลิก timeout ถ้าเกิด error
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
     }
   };
 
@@ -1355,9 +1345,9 @@ function HomeScreen({
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      {/* <View style={styles.header}>
         <Text style={styles.headerTitle}>Convergence</Text>
-      </View>
+      </View> */}
 
       <View style={styles.content}>
         <View style={styles.card}>
@@ -1681,6 +1671,78 @@ const styles = StyleSheet.create({
     marginTop: 8,
     lineHeight: 20,
   },
+  // Incoming Call Modal Styles
+  incomingCallOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  incomingCallContainer: {
+    width: '85%',
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 30,
+    alignItems: 'center',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  incomingCallHeader: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  incomingCallTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  incomingCallNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    marginTop: 10,
+  },
+  incomingCallButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginTop: 20,
+  },
+  acceptButton: {
+    backgroundColor: '#34C759',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 50,
+    minWidth: 100,
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#34C759',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  declineButton: {
+    backgroundColor: '#FF3B30',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 50,
+    minWidth: 100,
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#FF3B30',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  buttonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
 });
 
 export default function App() {
@@ -1715,12 +1777,60 @@ export default function App() {
   // เก็บ navigation reference สำหรับใช้ใน transfer functions
   const [navigationRef, setNavigationRef] = useState(null);
 
+  // State สำหรับ custom incoming call alert
+  const [showIncomingCall, setShowIncomingCall] = useState(false);
+  const [incomingCallNumber, setIncomingCallNumber] = useState('');
+  const [incomingCallRef, setIncomingCallRef] = useState(null);
+
+  // Ref สำหรับ ringtone ที่ใช้ร่วมกัน
+  const ringtoneRef = useRef(null);
+
+  // Effect สำหรับทำความสะอาดเมื่อ component unmount
+  useEffect(() => {
+    return () => {
+      // หยุดเสียงเรียกเข้าทุกแหล่งเมื่อ component ถูก unmount
+      console.log('🧹 Component unmounting - cleaning up ringtones');
+      AudioHelper.stopAllRingtones(ringtoneRef);
+      
+      // ปลดปล่อย ringtone resource
+      if (ringtoneRef.current) {
+        try {
+          ringtoneRef.current.release();
+          console.log('✅ Ringtone resource released');
+        } catch (error) {
+          console.log('❌ Error releasing ringtone:', error);
+        }
+      }
+    };
+  }, []);
+
+  // Effect สำหรับจัดการ AppState เพื่อหยุดเสียงเรียกเข้าเมื่อแอปเข้า background
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState) => {
+      console.log('App state changed to:', nextAppState);
+      
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        // หยุดเสียงเรียกเข้าเมื่อแอปเข้า background
+        console.log('📱 App going to background - stopping all ringtones');
+        AudioHelper.stopAllRingtones(ringtoneRef);
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription?.remove();
+    };
+  }, []);
+
   const [config, setConfig] = useState({
     username: '1004',
     domain: '192.168.0.5',
     password: 'con1004',
     port: '5060',
   });
+
+
 
   // ref for ConferenceCallManager
   const conferenceRef = useRef(null);
@@ -1738,6 +1848,180 @@ export default function App() {
     }
   };
 
+  // ฟังก์ชันจัดการปุ่มรับสाย
+  const handleAcceptCall = async () => {
+    try {
+      const call = incomingCallRef;
+      
+      // หยุดเสียงเรียกเข้าทุกแหล่งทันที
+      AudioHelper.stopAllRingtones(ringtoneRef);
+      
+      // ใช้ timeout เป็นการยืนยันให้หยุดเสียงแน่นอน
+      setTimeout(() => {
+        AudioHelper.stopAllRingtones(ringtoneRef);
+        console.log('🔄 Double-check: หยุดเสียงเรียกเข้าอีกครั้ง');
+      }, 100);
+
+      // ซ่อน custom alert
+      setShowIncomingCall(false);
+
+      // ตั้งค่า audio mode ก่อนรับสาย
+      AudioHelper.setCallAudioMode();
+
+      // ตรวจสอบและรับสาย
+      let answered = false;
+
+      // วิธีที่ 1: call.answer()
+      if (!answered && call && typeof call.answer === 'function') {
+        try {
+          await call.answer();
+          console.log('✅ Call answered via call.answer()');
+          answered = true;
+        } catch (error) {
+          console.log('❌ call.answer() failed:', error);
+        }
+      }
+
+      // วิธีที่ 2: call.answerCall()
+      if (!answered && call && typeof call.answerCall === 'function') {
+        try {
+          await call.answerCall();
+          console.log('✅ Call answered via call.answerCall()');
+          answered = true;
+        } catch (error) {
+          console.log('❌ call.answerCall() failed:', error);
+        }
+      }
+
+      // วิธีที่ 3: endpoint.answerCall()
+      if (!answered && endpointRef && endpointRef.answerCall) {
+        try {
+          await endpointRef.answerCall(call);
+          console.log('✅ Call answered via endpoint.answerCall()');
+          answered = true;
+        } catch (error) {
+          console.log('❌ endpoint.answerCall() failed:', error);
+        }
+      }
+
+      if (!answered) {
+        throw new Error('ไม่สามารถรับสายได้ - ลองทุกวิธีแล้ว');
+      }
+
+      // ตรวจสอบว่าไมค์เปิดอยู่หรือไม่
+      try {
+        if (call && typeof call.mute === 'function') {
+          call.mute(false);
+          console.log('✅ Microphone explicitly unmuted');
+        }
+      } catch (muteError) {
+        console.log('❌ Error unmuting microphone:', muteError);
+      }
+
+      setIsInCall(true);
+      setCurrentCallRef(call);
+      setCurrentCallNumber(incomingCallNumber);
+      navigationRef?.navigate('Calling');
+    } catch (error) {
+      console.error('Error answering call:', error);
+      Alert.alert('ข้อผิดพลาด', 'ไม่สามารถรับสายได้');
+      setCallStatus('❌ ไม่สามารถรับสาย');
+      setTimeout(() => setCallStatus(''), 2000);
+    }
+  };
+
+  // ฟังก์ชันจัดการปุ่มปฏิเสธสาย
+  const handleDeclineCall = async () => {
+    try {
+      const call = incomingCallRef;
+      
+      // หยุดเสียงเรียกเข้าทุกแหล่งทันที
+      AudioHelper.stopAllRingtones(ringtoneRef);
+      
+      // ใช้ timeout เป็นการยืนยันให้หยุดเสียงแน่นอน
+      setTimeout(() => {
+        AudioHelper.stopAllRingtones(ringtoneRef);
+        console.log('🔄 Double-check: หยุดเสียงเรียกเข้าอีกครั้ง');
+      }, 100);
+
+      // ซ่อน custom alert
+      setShowIncomingCall(false);
+
+      console.log('กำลังปฏิเสธสาย...');
+      setCallStatus('📞 กำลังปฏิเสธสาย...');
+
+      let rejected = false;
+
+      // วิธีที่ 1: ใช้ call.hangup()
+      if (!rejected && call && typeof call.hangup === 'function') {
+        try {
+          await call.hangup();
+          console.log('✅ Call rejected via call.hangup()');
+          rejected = true;
+        } catch (error) {
+          console.log('❌ call.hangup() failed:', error);
+        }
+      }
+
+      // วิธีที่ 2: ใช้ call.reject()
+      if (!rejected && call && typeof call.reject === 'function') {
+        try {
+          await call.reject();
+          console.log('✅ Call rejected via call.reject()');
+          rejected = true;
+        } catch (error) {
+          console.log('❌ call.reject() failed:', error);
+        }
+      }
+
+      // วิธีที่ 3: ใช้ endpointRef.hangupCall()
+      if (!rejected && endpointRef && endpointRef.hangupCall) {
+        try {
+          await endpointRef.hangupCall(call);
+          console.log('✅ Call rejected via endpoint.hangupCall');
+          rejected = true;
+        } catch (error) {
+          console.log('❌ endpoint.hangupCall failed:', error);
+        }
+      }
+
+      if (!rejected) {
+        console.log('⚠️ ไม่สามารถปฏิเสธสายได้: ไม่พบฟังก์ชันปฏิเสธสายที่ทำงานได้');
+      }
+
+      setCallStatus('📞 ปฏิเสธสายแล้ว');
+      setTimeout(() => setCallStatus(''), 2000);
+
+      // อัปเดตประวัติการโทรเป็น "ปฏิเสธ"
+      try {
+        const remoteNumber = incomingCallNumber || 'Unknown';
+        console.log('📝 อัปเดตประวัติการโทรเป็นปฏิเสธสาย:', remoteNumber);
+        saveCallHistory({
+          number: remoteNumber,
+          type: 'incoming',
+          status: 'declined',
+          timestamp: new Date().toISOString(),
+        }, 'default_user').then(() => {
+          console.log('✅ อัปเดตประวัติการโทรสำเร็จ (ปฏิเสธสาย)');
+        }).catch(error => {
+          console.error('❌ ไม่สามารถอัปเดตประวัติการโทรได้:', error);
+        });
+      } catch (error) {
+        console.error('❌ ข้อผิดพลาดในการอัปเดตประวัติการโทร:', error);
+      }
+
+      // รีเซ็ตสถานะ
+      setCurrentCallRef(null);
+      setCurrentCallNumber('');
+      setIncomingCallNumber('');
+      setIncomingCallRef(null);
+    } catch (error) {
+      console.error('Error declining call:', error);
+      setCallStatus('❌ ไม่สามารถปฏิเสธสาย');
+      setTimeout(() => setCallStatus(''), 2000);
+    }
+  };
+
   // Function to start call timer
   const startCallTimer = () => {
     // Clear existing timer if any
@@ -1752,14 +2036,14 @@ export default function App() {
     }, 1000);
   };
 
-  // ฟังก์ชันโทรออก (Mock Version)
+  // ฟังก์ชันโทรออก
   const makeCall = async callNumber => {
     if (!callNumber.trim()) {
       Alert.alert('ข้อผิดพลาด', 'กรุณาใส่หมายเลขที่ต้องการโทร');
       return;
     }
 
-    if (!isConnected) {
+    if (!isConnected || !accountRef) {
       Alert.alert('ข้อผิดพลาด', 'กรุณาเชื่อมต่อ SIP ก่อน');
       return;
     }
@@ -1767,65 +2051,97 @@ export default function App() {
     try {
       setCallStatus('📞 เริ่มโทร...');
       setCurrentCallNumber(callNumber);
-      setIsInCall(true);
+      setIsInCall(true); // ตั้งสถานะให้เป็น in call เมื่อเริ่มโทร
 
       // ตั้งค่า audio mode ก่อนโทร
       AudioHelper.setCallAudioMode();
 
-      console.log('📞 โทรออกไปยัง (Mock):', callNumber);
+      const callUri = `sip:${callNumber}@${config.domain}`;
+      console.log('📞 โทรออกไปยัง:', callUri);
 
-      // ใช้ mock service แทน
-      const callId = mockSipService.makeCall('mock_account', callNumber);
-      setCurrentCall(callId);
-      setIsHold(false);
+      const call = await endpointRef.makeCall(accountRef, callUri);
+      // เมื่อ call เชื่อมต่อแล้ว library จะจัดการส่งเสียงระหว่างอุปกรณ์ให้เอง
+      setCurrentCallRef(call);
+      setIsHold(false); // รีเซ็ต hold state เมื่อเริ่มโทรใหม่
       setCallStatus('📞 กำลังเชื่อมต่อ...');
 
-      console.log('✅ เริ่มโทรออกสำเร็จ (Mock)');
+      // บันทึกประวัติสายออก
+      try {
+        console.log('📝 บันทึกประวัติสายออก:', callNumber);
+        saveCallHistory({
+          number: callNumber,
+          type: 'outgoing',
+          status: 'calling',
+          timestamp: new Date().toISOString(),
+        }, 'default_user').then(() => {
+          console.log('✅ บันทึกประวัติสายออกสำเร็จ');
+        }).catch(error => {
+          console.error('❌ ไม่สามารถบันทึกประวัติสายออกได้:', error);
+        });
+      } catch (error) {
+        console.error('❌ ข้อผิดพลาดในการบันทึกประวัติสายออก:', error);
+      }
 
+      console.log('✅ เริ่มโทรออกสำเร็จ - สามารถโอนสายได้');
+
+      // เพิ่มการตรวจสอบไมค์หลังจากโทรออก
+      if (call) {
+        setTimeout(() => {
+          AudioHelper.checkAndFixMicrophone(call);
+          AudioHelper.forceMicrophoneEnable(call);
+        }, 2000); // รอ 2 วินาทีหลังจากโทรออกแล้วค่อยตรวจสอบ
+      }
     } catch (error) {
       setCallStatus('❌ โทรไม่สำเร็จ');
-      setIsInCall(false);
+      setIsInCall(false); // รีเซ็ตสถานะเมื่อโทรไม่สำเร็จ
       Alert.alert('ข้อผิดพลาด', `ไม่สามารถโทรได้: ${error.message}`);
       setTimeout(() => setCallStatus(''), 3000);
     }
   };
 
-  // ฟังก์ชันวางสาย (Mock Version)
+  // ฟังก์ชันวางสาย
   const hangupCall = async () => {
     try {
-      if (!currentCall) {
+      // ตรวจสอบว่ามีสายที่กำลังใช้งานอยู่หรือไม่
+      if (!currentCallRef) {
         console.log('ไม่พบสายที่กำลังใช้งาน');
         setCallStatus('❌ ไม่มีสายที่ต้องวาง');
         setTimeout(() => setCallStatus(''), 2000);
         return;
       }
 
-      console.log('กำลังวางสาย (Mock)...');
+      console.log('กำลังวางสาย...');
       setCallStatus('📞 กำลังวางสาย...');
 
       // รีเซ็ต audio mode ก่อนวางสาย
       AudioHelper.resetAudioMode();
 
-      // ใช้ mock service
-      mockSipService.hangupCall(currentCall);
-      
-      // รีเซ็ตสถานะ
-      setCurrentCall(null);
-      setCurrentCallRef(null);
-      setCurrentCallNumber('');
-      setIsInCall(false);
-      setIsHold(false);
-      setCallStatus('✅ วางสายแล้ว');
-      
-      console.log('✅ วางสายสำเร็จ (Mock)');
-      setTimeout(() => setCallStatus(''), 2000);
+      try {
+        let cancelled = false;
 
-    } catch (error) {
-      console.error('ข้อผิดพลาดในการวางสาย:', error);
-      setCallStatus('❌ วางสายไม่สำเร็จ');
-      setTimeout(() => setCallStatus(''), 2000);
-    }
-  };
+        // วิธีที่ 1: ใช้ currentCallRef.hangup()
+        if (
+          !cancelled &&
+          currentCallRef &&
+          typeof currentCallRef.hangup === 'function'
+        ) {
+          try {
+            await currentCallRef.hangup();
+            console.log('✅ Call cancelled via currentCallRef.hangup()');
+            cancelled = true;
+          } catch (error) {
+            console.log('❌ currentCallRef.hangup() failed:', error);
+          }
+        }
+
+        // วิธีที่ 2: ใช้ endpointRef.hangupCall() กับ call object
+        if (!cancelled && endpointRef && endpointRef.hangupCall) {
+          try {
+            await endpointRef.hangupCall(currentCallRef);
+            console.log('✅ Call cancelled via endpoint.hangupCall');
+            cancelled = true;
+          } catch (error) {
+            console.log('❌ endpoint.hangupCall failed:', error);
           }
         }
 
@@ -2431,7 +2747,7 @@ export default function App() {
   // ฟังก์ชันเชื่อมต่อสายแบบใหม่ (เครื่องที่รอสายต่อกับหมายเลขปลายทาง)
   const connectCallToTarget = async targetNumber => {
     try {
-      console.log('� เริ่มการเชื่อมต่อสายแบบใหม่...');
+      console.log('� เริ่มการเชื่อมต่อสายแบบใหม่');
       console.log('� เครื่องที่รอสายจะต่อกับ:', targetNumber);
 
       // ใช้ domain จาก config หรือ default domain
@@ -3190,9 +3506,9 @@ export default function App() {
 
   // ส่ง props ไปทั้งสองหน้า
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={setNavigationRef}>
       <Stack.Navigator initialRouteName="Softphone">
-        <Stack.Screen name="Softphone" options={{ title: 'Convergence' }}>
+        <Stack.Screen name="Softphone" options={{ headerShown: false }}>
           {props => (
             <ConvergenceScreen
               {...props}
@@ -3223,7 +3539,9 @@ export default function App() {
         />
         <Stack.Screen
           name="Contacts"
-          options={{ title: 'ผู้ติดต่อ' }}
+          options={{ 
+            headerShown: false
+          }}
         >
           {props => (
             <ContactScreen
@@ -3254,7 +3572,17 @@ export default function App() {
             />
           )}
         </Stack.Screen>
-        <Stack.Screen name="SIPConnector" options={{ title: 'SIP Connector' }}>
+        <Stack.Screen name="SIPConnector" options={{ 
+          title: 'การตั้งค่า SIP',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: '#007AFF',
+          },
+          headerTintColor: '#fff',
+          headerTitleStyle: {
+            fontWeight: 'bold',
+          }
+        }}>
           {props => (
             <HomeScreen
               {...props}
@@ -3270,6 +3598,12 @@ export default function App() {
               setCurrentCallNumber={setCurrentCallNumber}
               config={config}
               setConfig={setConfig}
+              setIncomingCallNumber={setIncomingCallNumber}
+              setIncomingCallRef={setIncomingCallRef}
+              setShowIncomingCall={setShowIncomingCall}
+              incomingCallRef={incomingCallRef}
+              incomingCallNumber={incomingCallNumber}
+              ringtoneRef={ringtoneRef}
             />
           )}
         </Stack.Screen>
@@ -3311,6 +3645,38 @@ export default function App() {
         setCurrentCallRef={setCurrentCallRef}
         navigation={navigationRef}
       />
+      
+      {/* Custom Incoming Call Alert */}
+      {showIncomingCall && (
+        <Modal
+          transparent={true}
+          visible={showIncomingCall}
+          animationType="fade"
+        >
+          <View style={styles.incomingCallOverlay}>
+            <View style={styles.incomingCallContainer}>
+              <Text style={styles.incomingCallTitle}>📞 สายเรียกเข้า</Text>
+              <Text style={styles.incomingCallNumber}>{incomingCallNumber}</Text>
+              
+              <View style={styles.incomingCallButtons}>
+                <TouchableOpacity
+                  style={[styles.incomingCallButton, styles.declineButton]}
+                  onPress={handleDeclineCall}
+                >
+                  <Text style={styles.buttonText}>❌ ปฏิเสธ</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.incomingCallButton, styles.acceptButton]}
+                  onPress={handleAcceptCall}
+                >
+                  <Text style={styles.buttonText}>✅ รับสาย</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </NavigationContainer>
   );
 }

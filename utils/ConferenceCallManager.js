@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, FlatList, TextInput } from 'react-native';
-import { Endpoint } from 'react-native-pjsip';
+import { AudioManager } from './AudioManager';
 
 // ConferenceCallManager Component
 const ConferenceCallManager = forwardRef(({
@@ -12,7 +12,6 @@ const ConferenceCallManager = forwardRef(({
   setIsInCall,
   setCallStatus,
   setCurrentCallRef,
-  AudioHelper,
   navigation
 }, ref) => {
   // State สำหรับจัดการ conference
@@ -86,13 +85,11 @@ const ConferenceCallManager = forwardRef(({
       }
       
       // เปิดโหมด speaker สำหรับ conference
-      if (AudioHelper && AudioHelper.enableSpeaker) {
-        try {
-          await AudioHelper.enableSpeaker();
-          console.log('✅ เปิด Speaker สำหรับ Conference สำเร็จ');
-        } catch (error) {
-          console.log('❌ ไม่สามารถเปิด Speaker ได้:', error.message);
-        }
+      try {
+        await AudioManager.enableSpeaker();
+        console.log('✅ เปิด Speaker สำหรับ Conference สำเร็จ');
+      } catch (error) {
+        console.log('❌ ไม่สามารถเปิด Speaker ได้:', error.message);
       }
       
       setCallStatus('📞 Conference Bridge Mode เปิดใช้งานแล้ว');
@@ -389,7 +386,7 @@ const ConferenceCallManager = forwardRef(({
       setCurrentCallRef(null);
       
       // รีเซ็ต audio mode
-      AudioHelper.resetAudioMode();
+      AudioManager.resetAudioMode();
       
       setCallStatus('Conference สิ้นสุดแล้ว');
       

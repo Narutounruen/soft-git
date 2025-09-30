@@ -37,14 +37,8 @@ const AddContactScreen = ({ navigation }) => {
     // Remove all non-digit characters
     const cleanedPhone = text.replace(/\D/g, '');
     setPhone(cleanedPhone);
-    
-    if (cleanedPhone.length < 9) {
-      setPhoneError('เบอร์โทรศัพท์ไม่ถูกต้อง');
-    } else if (cleanedPhone.length > 10) {
-      setPhoneError('เบอร์โทรศัพท์ยาวเกินไป');
-    } else {
-      setPhoneError('');
-    }
+    // Remove validation - allow any phone number
+    setPhoneError('');
   };
 
   const handleSave = async () => {
@@ -53,7 +47,7 @@ const AddContactScreen = ({ navigation }) => {
       return;
     }
 
-    if (nameError || phoneError) {
+    if (nameError) {
       Alert.alert('ข้อผิดพลาด', 'กรุณาแก้ไขข้อมูลให้ถูกต้อง');
       return;
     }
@@ -82,7 +76,7 @@ const AddContactScreen = ({ navigation }) => {
     }
   };
 
-  const isFormInvalid = Boolean(!name.trim() || !phone.trim() || nameError || phoneError || isLoading);
+  const isFormInvalid = Boolean(!name.trim() || !phone.trim() || nameError || isLoading);
 
   return (
     <SafeAreaView style={styles.container}>

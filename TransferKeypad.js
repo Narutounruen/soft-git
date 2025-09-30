@@ -105,12 +105,12 @@ const TransferKeypad = ({
       <View style={styles.modalOverlay}>
         <View style={styles.modalContainer}>
           {/* Header */}
-          <View style={styles.header}>
+          {/* <View style={styles.header}>
             <Text style={styles.headerTitle}>{getTransferTypeText()}</Text>
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
               <Text style={styles.closeButtonText}>✕</Text>
             </TouchableOpacity>
-          </View>
+          </View> */}
 
           {/* Display Screen */}
           <View style={styles.displayContainer}>
