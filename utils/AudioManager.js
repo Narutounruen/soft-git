@@ -68,7 +68,7 @@ export class AudioManager {
           .catch(error => console.error('Native audio mode error:', error));
       }
 
-      console.log('✅ ตั้งค่า call audio mode สำเร็จ (ไม่มีเสียง connect/disconnect)');
+      console.log('✅ ตั้งค่า call audio mode สำเร็จ');
       return true;
     } catch (error) {
       console.error('❌ Error setting call audio mode:', error);
@@ -93,7 +93,7 @@ export class AudioManager {
           .catch(error => console.error('Native reset audio error:', error));
       }
 
-      console.log('✅ รีเซ็ต audio mode สำเร็จ (ไม่มีเสียง disconnect)');
+      console.log('✅ รีเซ็ต audio mode สำเร็จ');
       return true;
     } catch (error) {
       console.error('❌ Error resetting audio mode:', error);

@@ -215,4 +215,58 @@ export class CallManager {
       throw error;
     }
   }
+
+  /**
+   * รับสายเข้า - ลองหลายวิธี
+   * @param {Object} call - Call object ที่ต้องการรับ
+   * @param {Object} endpointRef - Endpoint reference
+   * @returns {boolean} - สำเร็จหรือไม่
+   */
+  static async answerCall(call, endpointRef = null) {
+    if (!call) {
+      console.log('❌ ไม่พบสายที่ต้องการรับ');
+      return false;
+    }
+
+    let answered = false;
+
+    // วิธีที่ 1: call.answer()
+    if (!answered && typeof call.answer === 'function') {
+      try {
+        await call.answer();
+        console.log('✅ รับสายสำเร็จด้วย call.answer()');
+        answered = true;
+      } catch (error) {
+        console.log('❌ call.answer() ล้มเหลว:', error.message);
+      }
+    }
+
+    // วิธีที่ 2: call.answerCall()
+    if (!answered && typeof call.answerCall === 'function') {
+      try {
+        await call.answerCall();
+        console.log('✅ รับสายสำเร็จด้วย call.answerCall()');
+        answered = true;
+      } catch (error) {
+        console.log('❌ call.answerCall() ล้มเหลว:', error.message);
+      }
+    }
+
+    // วิธีที่ 3: endpoint.answerCall()
+    if (!answered && endpointRef && typeof endpointRef.answerCall === 'function') {
+      try {
+        await endpointRef.answerCall(call);
+        console.log('✅ รับสายสำเร็จด้วย endpoint.answerCall()');
+        answered = true;
+      } catch (error) {
+        console.log('❌ endpoint.answerCall() ล้มเหลว:', error.message);
+      }
+    }
+
+    if (!answered) {
+      console.log('❌ ไม่สามารถรับสายได้ - ลองทุกวิธีแล้ว');
+    }
+
+    return answered;
+  }
 }

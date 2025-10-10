@@ -51,7 +51,6 @@ const ConvergenceScreen = ({
   makeCall,
   hangupCall,
   setCurrentCallNumber,
-  navigateToCalling,
   config,
 }) => {
   const [number, setNumber] = useState('');

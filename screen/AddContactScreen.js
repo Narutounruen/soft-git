@@ -24,7 +24,7 @@ const AddContactScreen = ({ navigation }) => {
   const [phoneError, setPhoneError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const validateName = (text) => {
+  const validateName = text => {
     setName(text);
     if (text.trim().length < 2) {
       setNameError('ชื่อต้องมีอย่างน้อย 2 ตัวอักษร');
@@ -33,7 +33,7 @@ const AddContactScreen = ({ navigation }) => {
     }
   };
 
-  const validatePhone = (text) => {
+  const validatePhone = text => {
     // Remove all non-digit characters
     const cleanedPhone = text.replace(/\D/g, '');
     setPhone(cleanedPhone);
@@ -59,12 +59,12 @@ const AddContactScreen = ({ navigation }) => {
         phone: phone.trim(),
         createdAt: firestore.FieldValue.serverTimestamp(),
       });
-      
+
       Alert.alert('สำเร็จ', 'เพิ่มผู้ติดต่อเรียบร้อยแล้ว', [
-        { 
-          text: 'ตกลง', 
-          onPress: () => navigation.goBack() 
-        }
+        {
+          text: 'ตกลง',
+          onPress: () => navigation.goBack(),
+        },
       ]);
       setName('');
       setPhone('');
@@ -76,12 +76,14 @@ const AddContactScreen = ({ navigation }) => {
     }
   };
 
-  const isFormInvalid = Boolean(!name.trim() || !phone.trim() || nameError || isLoading);
+  const isFormInvalid = Boolean(
+    !name.trim() || !phone.trim() || nameError || isLoading,
+  );
 
   return (
     <SafeAreaView style={styles.container}>
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.scrollContainer}
           showsVerticalScrollIndicator={false}
         >
@@ -90,7 +92,9 @@ const AddContactScreen = ({ navigation }) => {
               <Icon name="person-add" size={60} color="#4A90E2" />
             </View>
             <Text style={styles.title}>เพิ่มผู้ติดต่อใหม่</Text>
-            <Text style={styles.subtitle}>กรอกข้อมูลผู้ติดต่อที่ต้องการเพิ่ม</Text>
+            <Text style={styles.subtitle}>
+              กรอกข้อมูลผู้ติดต่อที่ต้องการเพิ่ม
+            </Text>
           </View>
 
           <View style={styles.formContainer}>
@@ -98,7 +102,12 @@ const AddContactScreen = ({ navigation }) => {
               <Text style={styles.label}>
                 <Icon name="person-outline" size={16} color="#8E8E93" /> ชื่อ
               </Text>
-              <View style={[styles.inputWrapper, nameError ? styles.inputError : null]}>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  nameError ? styles.inputError : null,
+                ]}
+              >
                 <TextInput
                   style={styles.input}
                   value={name}
@@ -111,14 +120,22 @@ const AddContactScreen = ({ navigation }) => {
                   <Icon name="checkmark-circle" size={20} color="#34C759" />
                 )}
               </View>
-              {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
+              {nameError ? (
+                <Text style={styles.errorText}>{nameError}</Text>
+              ) : null}
             </View>
 
             <View style={styles.inputContainer}>
               <Text style={styles.label}>
-                <Icon name="call-outline" size={16} color="#8E8E93" /> เบอร์โทรศัพท์
+                <Icon name="call-outline" size={16} color="#8E8E93" />{' '}
+                เบอร์โทรศัพท์
               </Text>
-              <View style={[styles.inputWrapper, phoneError ? styles.inputError : null]}>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  phoneError ? styles.inputError : null,
+                ]}
+              >
                 <TextInput
                   style={styles.input}
                   value={phone}
@@ -132,16 +149,18 @@ const AddContactScreen = ({ navigation }) => {
                   <Icon name="checkmark-circle" size={20} color="#34C759" />
                 )}
               </View>
-              {phoneError ? <Text style={styles.errorText}>{phoneError}</Text> : null}
+              {phoneError ? (
+                <Text style={styles.errorText}>{phoneError}</Text>
+              ) : null}
             </View>
           </View>
 
           <View style={styles.buttonContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
-                styles.saveButton, 
-                isFormInvalid ? styles.saveButtonDisabled : null
-              ]} 
+                styles.saveButton,
+                isFormInvalid ? styles.saveButtonDisabled : null,
+              ]}
               onPress={handleSave}
               disabled={isFormInvalid}
             >

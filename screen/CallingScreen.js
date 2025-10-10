@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { useContacts } from '../useContacts';
 import { AudioManager } from '../utils/AudioManager';
+import ConferenceCallManager from '../utils/ConferenceCallManager';
+// Removed NativeModules/PjSipModule usage; we use higher-level conference helpers passed via props
 
 const { width, height } = Dimensions.get('window');
 
@@ -28,18 +30,25 @@ const CallingScreen = ({
   isInCall,
   isHold,
   currentCallNumber,
+  setCurrentCallRef,
+  setIsInCall,
+  currentCallRef,
+  endpointRef,
+  accountRef,
+  config,
   showUnattendedTransferDialog,
   showAttendedTransferDialog,
+  // Conference helpers injected from parent (App)
   conference,
   addToConference,
   removeFromConference,
+  startConferenceBridge,
+  showConferenceBridge,
   conferenceParticipants = [],
   isInConference = false,
-  // Conference Bridge props
-  conferenceBridge,
-  showConferenceBridge,
-  startConferenceBridge,
 }) => {
+  // สร้าง ref สำหรับ ConferenceCallManager
+  const conferenceCallManagerRef = useRef();
   const { contacts } = useContacts(); // เพิ่มเพื่อค้นหาข้อมูล contact
   
   useLayoutEffect(() => {
@@ -51,6 +60,7 @@ const CallingScreen = ({
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [showConferenceModal, setShowConferenceModal] = useState(false);
+  const [conferenceStatus, setConferenceStatus] = useState('');
 
   // เริ่มการนับเวลาการโทร
   useEffect(() => {
@@ -203,73 +213,40 @@ const CallingScreen = ({
 
   // เพิ่มฟังก์ชันจัดการการโอนสาย
   const handleTransfer = () => {
-    Alert.alert('เลือกประเภทการโอนสาย', 'เลือกประเภทการโอนสายที่ต้องการ', [
-      {
-        text: 'ยกเลิก',
-        style: 'cancel',
-      },
-      {
-        text: 'โอนสายทันที',
-        onPress: () => showUnattendedTransferDialog(),
-      },
-      {
-        text: 'โอนสายแบบปรึกษา',
-        onPress: () => showAttendedTransferDialog(),
-      },
+    Alert.alert('โอนสาย', 'ขณะนี้รองรับเฉพาะการโอนสายแบบทันที (โอนสายปรึกษาจะใช้งานได้ในเร็วๆนี้)', [
+      { text: 'ยกเลิก', style: 'cancel' },
+      { text: 'โอนสายทันที', onPress: () => showUnattendedTransferDialog() },
     ]);
   };
 
-  // เพิ่มฟังก์ชันจัดการ conference
+  // เพิ่มฟังก์ชันจัดการ conference โดยใช้ helpers ที่ส่งมาจาก App
   const handleConference = async () => {
-    try {
-      if (showConferenceBridge && startConferenceBridge) {
-        // เริ่ม Conference Bridge
-        const success = await startConferenceBridge();
-        if (success) {
-          // แสดง Conference Bridge Modal
-          showConferenceBridge();
-        } else {
-          Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเริ่ม Conference ได้');
-        }
-      } else if (conference) {
-        // ใช้ Conference เดิม (fallback)
-        conference();
-      } else {
-        Alert.alert('Conference', 'ฟีเจอร์ Conference ยังไม่พร้อมใช้งาน');
-      }
-    } catch (error) {
-      console.error('Conference error:', error);
-      Alert.alert('ข้อผิดพลาด', 'เกิดข้อผิดพลาดในการเริ่ม Conference');
-    }
+    Alert.alert('Conference', 'ฟีเจอร์ประชุมสายจะเพิ่มในเร็วๆนี้');
   };
 
   // เพิ่มฟังก์ชันเพิ่มสายใน conference
   const handleAddToConference = () => {
     if (showConferenceBridge) {
-      // แสดง Conference Bridge เพื่อเพิ่มผู้เข้าร่วม
       showConferenceBridge();
-    } else if (addToConference) {
-      addToConference();
-    } else {
-      Alert.alert('เพิ่มสาย', 'ฟีเจอร์เพิ่มสายยังไม่พร้อมใช้งาน');
+      return;
     }
+    if (typeof addToConference === 'function') {
+      // ถ้ามี UI อื่นสำหรับใส่หมายเลข ควรเรียกที่นี่
+      Alert.alert('เพิ่มสาย', 'กรุณาใช้หน้าจอ Conference เพื่อเพิ่มสาย');
+      return;
+    }
+    Alert.alert('เพิ่มสาย', 'ฟีเจอร์เพิ่มสายยังไม่พร้อมใช้งาน');
   };
 
   // เพิ่มฟังก์ชันออกจาก conference
+
   const handleLeaveConference = () => {
     Alert.alert('ออกจาก Conference', 'ต้องการออกจาก conference หรือไม่?', [
       { text: 'ยกเลิก', style: 'cancel' },
       {
         text: 'ออก',
         onPress: () => {
-          if (removeFromConference) {
-            removeFromConference();
-          } else {
-            Alert.alert(
-              'ออกจาก Conference',
-              'ฟีเจอร์ออกจาก conference ยังไม่พร้อมใช้งาน',
-            );
-          }
+          conferenceCallManagerRef.current?.endConference();
         },
       },
     ]);
@@ -277,17 +254,12 @@ const CallingScreen = ({
 
   // เพิ่มฟังก์ชันเปิด modal จัดการ conference
   const handleConferenceManagement = () => {
-    if (showConferenceBridge) {
-      // แสดง Conference Bridge
-      showConferenceBridge();
-    } else {
-      // Fallback เดิม
-      setShowConferenceModal(true);
-    }
+    // เปิด modal ของ ConferenceCallManager (ถ้ามี)
+    conferenceCallManagerRef.current?.openAddParticipantModal();
   };
 
   const handleRecord = () => {
-    Alert.alert('อัดเสียง', 'ฟีเจอร์อัดเสียงจะเพิ่มในภายหลัง');
+    Alert.alert('อัดเสียง', 'ฟีเจอร์อัดเสียงจะเพิ่มในเร็วๆนี้');
   };
 
   // กำหนดสถานะการแสดงผลปกติ
@@ -318,12 +290,10 @@ const CallingScreen = ({
     };
   };
 
-
-
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
+      {/* Header - Hidden */}
+      {/* <View style={styles.header}>
         <Text style={styles.headerText}>
           {isInConference ? 'Conference Call' : 'กำลังโทร'}
         </Text>
@@ -332,7 +302,7 @@ const CallingScreen = ({
             {conferenceParticipants.length} สาย
           </Text>
         )}
-      </View>
+      </View> */}
 
       {/* Call Info */}
       <View style={styles.callInfoContainer}>
@@ -536,66 +506,17 @@ const CallingScreen = ({
         </TouchableOpacity>
       </View>
 
-      {/* Conference Management Modal */}
-      {showConferenceModal && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>จัดการ Conference</Text>
-
-            <View style={styles.modalBody}>
-              <Text style={styles.modalSubtitle}>
-                สายที่เข้าร่วม ({conferenceParticipants.length})
-              </Text>
-              {conferenceParticipants.map((participant, index) => (
-                <View key={index} style={styles.participantRow}>
-                  <Text style={styles.participantText}>
-                    {participant.number || participant}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.removeButton}
-                    onPress={() => {
-                      Alert.alert(
-                        'ลบสาย',
-                        `ต้องการลบ ${
-                          participant.number || participant
-                        } ออกจาก conference หรือไม่?`,
-                        [
-                          { text: 'ยกเลิก', style: 'cancel' },
-                          {
-                            text: 'ลบ',
-                            onPress: () => {
-                              // เรียกฟังก์ชันลบสาย (ต้อง implement ใน App.js)
-                              if (removeFromConference) {
-                                removeFromConference(participant);
-                              }
-                            },
-                          },
-                        ],
-                      );
-                    }}
-                  >
-                    <Text style={styles.removeButtonText}>❌</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-
-              <TouchableOpacity
-                style={styles.addParticipantButton}
-                onPress={handleAddToConference}
-              >
-                <Text style={styles.addParticipantText}>➕ เพิ่มสายใหม่</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={styles.closeModalButton}
-              onPress={() => setShowConferenceModal(false)}
-            >
-              <Text style={styles.closeModalText}>ปิด</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+      {/* ConferenceCallManager UI */}
+      <ConferenceCallManager
+        ref={conferenceCallManagerRef}
+        endpointRef={endpointRef}
+        accountRef={accountRef}
+        currentCallRef={currentCallRef}
+        config={config}
+        isInCall={isInCall}
+        setCallStatus={setConferenceStatus}
+        navigation={navigation}
+      />
     </View>
   );
 };
@@ -604,6 +525,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+  },
+  mergeButton: { 
+    backgroundColor: '#007AFF', 
+    padding: 10, 
+    borderRadius: 8,
+    margin: 10
+  },
+  mergeText: { 
+    color: 'white', 
+    fontWeight: 'bold',
+    textAlign: 'center'
   },
   header: {
     paddingTop: isTablet ? 24 : 16,

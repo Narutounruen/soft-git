@@ -14,11 +14,31 @@ const COLLECTION_NAME = 'callHistory';
  */
 export const saveCallHistory = async (callData, userId = 'default_user') => {
   try {
+    // สร้าง key ป้องกันซ้ำ: เบอร์ + วัน + ชั่วโมง + นาที
+    const number = callData.number;
+    const dateObj = new Date(callData.timestamp || callData.createdAt || Date.now());
+    const dateKey = `${dateObj.getFullYear()}-${dateObj.getMonth()+1}-${dateObj.getDate()}_${dateObj.getHours()}_${dateObj.getMinutes()}`;
+    const uniqueKey = `${number}_${dateKey}`;
+
+    // ตรวจสอบว่ามี record นี้อยู่แล้วหรือยัง
+    const snapshot = await firestore()
+      .collection(COLLECTION_NAME)
+      .where('userId', '==', userId)
+      .where('number', '==', number)
+      .where('createdAtKey', '==', uniqueKey)
+      .limit(1)
+      .get();
+    if (!snapshot.empty) {
+      console.log('Call history already exists for:', uniqueKey);
+      return null;
+    }
+
     const callRecord = {
       ...callData,
       userId,
       timestamp: firestore.FieldValue.serverTimestamp(),
       createdAt: new Date().toISOString(),
+      createdAtKey: uniqueKey,
     };
 
     const docRef = await firestore()
@@ -31,45 +51,12 @@ export const saveCallHistory = async (callData, userId = 'default_user') => {
     console.error('Error saving call history:', error);
     throw error;
   }
-};
+}
 
 /**
- * Get call history from Firestore
- * @param {string} userId - User ID to filter calls
- * @param {number} limit - Number of records to fetch (default: 50)
- * @returns {Promise<Array>} Array of call history objects
- */
-export const getCallHistory = async (userId = 'default_user', limit = 50) => {
-  try {
-    const snapshot = await firestore()
-      .collection(COLLECTION_NAME)
-      .where('userId', '==', userId)
-      .limit(limit)
-      .get();
-
-    const callHistory = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    // Sort by createdAt in JavaScript instead of Firestore
-    const sortedHistory = callHistory.sort((a, b) => {
-      const dateA = new Date(a.createdAt || a.timestamp || 0);
-      const dateB = new Date(b.createdAt || b.timestamp || 0);
-      return dateB - dateA; // Descending order (newest first)
-    });
-
-    return sortedHistory;
-  } catch (error) {
-    console.error('Error fetching call history:', error);
-    throw error;
-  }
-};
-
-/**
- * Listen to real-time call history updates
- * @param {string} userId - User ID to filter calls
- * @param {Function} callback - Callback function to handle updates
+ * Subscribe to call history updates
+ * @param {string} userId - User ID to filter call history
+ * @param {Function} callback - Callback to handle updates
  * @param {number} limit - Number of records to fetch (default: 50)
  * @returns {Function} Unsubscribe function
  */
@@ -155,4 +142,4 @@ export const clearCallHistory = async (userId = 'default_user') => {
     console.error('Error clearing call history:', error);
     throw error;
   }
-};
+}
